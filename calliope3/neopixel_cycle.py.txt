@@ -1,0 +1,13 @@
+#cycle
+#==========================================
+import calliopemini as CM
+import neopixel
+
+pixel = neopixel.NeoPixel(CM.pin_RGB, 3) 
+while not CM.button_b.was_pressed(): 
+    for no in range(3): 
+        pixel[no] = (100, 0, 100) 
+        pixel.show() 
+        CM.sleep(100) 
+        pixel.clear() 
+pixel.clear()

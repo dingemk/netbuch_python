@@ -1,0 +1,788 @@
+/* Python-IDE Styles */
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+#workarea {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Editor links */
+#left {
+    flex: 0 0 50%;
+    min-width: 200px;
+    max-width: 80%;
+    display: flex;
+    min-height: 0;
+    position: relative;
+    z-index: 1;
+    touch-action:auto!important;
+}
+
+/* Laufen-Icon und Notfall-Reset mittig in der Kopfleiste */
+.run-icon-center {
+    position: static;      /* stay in flex flow */
+    left: auto;
+    right: auto;
+    margin-left: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.run-icon {
+    display: inline-block;
+    background: #28a745;
+    color: white;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 40px;
+    font-size: 20px;
+    animation: pulse 2s infinite;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.run-icon:hover {
+    background: #218838;
+    transform: scale(1.1);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.run-icon:active {
+    transform: scale(0.95);
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+/* iOS: Editor muss Platz bekommen (nur Container!) */
+#editor {
+  flex: 1 1 auto;
+  min-height: 0;   /* wichtig in Flex-Layouts */
+  width: 100%;
+}
+
+/* iOS: Editor darf Touch-Gesten nutzen (kein globales "none") */
+#editor, .monaco-editor, .monaco-editor * {
+  touch-action: auto !important;
+}
+
+/* Falls du irgendwo global user-select: none gesetzt hast,
+   erlaube es zumindest für Inputs/Textareas wieder */
+input, textarea, [contenteditable="true"] {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+
+
+/* vertikaler Resizer */
+#resizer {
+    flex: 0 0 8px !important;
+    background: #e5e7eb !important;
+    cursor: col-resize !important;
+    user-select: none !important;
+    position: relative !important;
+    z-index: 10 !important;
+    min-width: 8px !important;
+    max-width: 8px !important;
+    border-left: 1px solid #d1d5db !important;
+    border-right: 1px solid #d1d5db !important;
+}
+
+/* rechts: Canvas + Output */
+#right {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 260px;
+    min-height: 0;
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+}
+
+#canvas-wrap {
+   flex: 1 1 auto;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  position: relative;
+  padding: 0;
+  border: 0;
+  min-height: 60%;
+  max-height: none;
+  border-bottom: 2px solid #e5e7eb;
+  width: 100%;
+  max-width: 900px;
+  background: #fff;
+  overflow: hidden;
+}
+
+#canvas {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: #fafafa;
+}
+
+#resizer-h {
+    height: 8px !important;
+    background: #e5e7eb !important;
+    cursor: row-resize !important;
+    user-select: none !important;
+    min-height: 8px !important;
+    max-height: 8px !important;
+    border-top: 1px solid #d1d5db !important;
+    border-bottom: 1px solid #d1d5db !important;
+    z-index: 100 !important;
+}
+
+/* Output: hell */
+#output {
+    flex: 1 1 0; /* Feste Größe, wächst nicht mit Inhalt */
+    background: #ffffff;
+    color: #111;
+    padding: 8px;
+    overflow-y: auto; /* Nur vertikale Scrollbar */
+    overflow-x: hidden; /* Keine horizontale Scrollbar */
+    white-space: pre-wrap; /* Behält Zeilenumbrüche */
+    min-height: 80px;
+    max-height: 300px; /* Maximale Höhe */
+    border-top: 1px solid #e5e7eb;
+    line-height: 1.4;
+    resize: none; /* Keine manuelle Größenänderung */
+}
+
+/* Dateiliste */
+#files-panel {
+    background: #fff;
+    border-top: 1px solid #e5e7eb;
+    height: 200px; /* Standard-Höhe für Layouts mit Canvas */
+    max-height: 200px;
+    min-height: 150px;
+    overflow-y: auto;
+    overflow-x:hidden;
+    -webkit-overflow-scrolling: touch;
+    flex-shrink: 0; /* Verhindert Schrumpfen */
+    flex-basis: 200px; /* Feste Basis-Größe */
+}
+
+/* Spezielle Höhe für Layout "Output + Dateien" (ohne Canvas) */
+#files-panel.layout-output-files {
+    height: 30vh !important; /* 30% der Viewport-Höhe */
+    max-height: 30vh !important;
+    flex-basis: 30vh !important;
+}
+
+/* Output-Bereich für Layout "Output + Dateien" */
+#output.layout-output-files {
+    height: 70vh !important; /* 70% der Viewport-Höhe */
+    max-height: 70vh !important;
+    flex-basis: 70vh !important;
+}
+
+/* Lizenz-Modal Styling */
+.license-section {
+    border-left: 4px solid #007bff;
+    padding-left: 15px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+    padding: 15px;
+}
+
+.license-section h6 {
+    color: #007bff;
+    margin-bottom: 10px;
+}
+
+.license-section p {
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.license-section a {
+    color: #007bff;
+    text-decoration: none;
+}
+
+.license-section a:hover {
+    text-decoration: underline;
+}
+
+/* Impressum-Modal Styling */
+.impressum-section {
+    border-left: 4px solid #28a745;
+    padding-left: 15px;
+    background-color: #f8f9fa;
+    border-radius: 5px;
+    padding: 15px;
+}
+
+.impressum-section h6 {
+    color: #28a745;
+    margin-bottom: 10px;
+}
+
+.impressum-section p {
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+.impressum-section a {
+    color: #28a745;
+    text-decoration: none;
+}
+
+.impressum-section a:hover {
+    text-decoration: underline;
+}
+
+.impressum-section ul {
+    margin-bottom: 0;
+    padding-left: 20px;
+}
+
+.impressum-section li {
+    margin-bottom: 5px;
+}
+
+/* Dropdown-Menüs */
+/* Dropdown-Menüs – Bootstrap übernehmen lassen */
+.dropdown-menu {
+    /* kein display:none hier, Bootstrap steuert das */
+    position: absolute;
+    z-index: 1000;
+    min-width: 150px;
+}
+
+.dropdown-menu.show {
+    display: block;
+}
+
+.dropdown-item {
+    display: block;
+    padding: 8px 16px;
+    text-decoration: none;
+    color: #333;
+    border-bottom: 1px solid #eee;
+}
+
+.dropdown-item:last-child {
+    border-bottom: none;
+}
+
+.dropdown-item:hover {
+    background-color: #f8f9fa;
+}
+
+.dropdown-divider {
+    height: 1px;
+    background: #eee;
+    margin: 4px 0;
+}
+
+.dropdown-header {
+    padding: 8px 16px;
+    color: #666;
+    font-weight: bold;
+    font-size: 0.9em;
+}
+
+/* Beispiele Modal */
+.example-card {
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: 2px solid transparent;
+    margin-bottom: 0.75rem;
+    padding: 0.375rem;
+    border-radius: 0.375rem;
+}
+
+.example-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.example-card.selected {
+    border-color: #0d6efd;
+    background-color: #e7f1ff;
+}
+
+.example-image {
+    width: 100%;
+    height: 80px;
+    object-fit: contain;
+    border-radius: 0.375rem;
+    border: 1px solid #dee2e6;
+}
+
+.example-title {
+    text-align: center;
+    margin-top: 0.375rem;
+    font-weight: bold;
+    color: #495057;
+    font-size: 0.8rem;
+}
+
+
+/* Run-Icon optisch deaktivieren */
+.run-icon.disabled {
+  opacity: .5;
+  filter: grayscale(1);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* „unsichtbar“ schalten */
+.hidden {
+  display: none !important;
+}
+
+/* --- Fix für das Hamburger-Dropdown (sichtbar trotz Layout-Container) --- */
+
+/* Dropdown darf über die Navbar hinausragen */
+.navbar { overflow: visible; }
+
+/* Falls der Navbar-Inhalt (container) overflow versteckt */
+.navbar > .container,
+.navbar > .container-fluid {
+  overflow: visible;
+}
+
+/* Hamburger-Menü liegt über Run-Icon & Co. */
+.navbar .dropdown-menu {
+  z-index: 3000;          /* höher als alles andere in der Topbar */
+  position: absolute;     /* Popper/Bootstrap setzt sonst transform – so ist's stabil */
+}
+
+/* Rechts ausrichten wirklich rechts (für .dropdown-menu-end) */
+#hamburger-dropdown .dropdown-menu.dropdown-menu-end {
+  right: 0;
+  left: auto;
+}
+
+/* DEBUG: verhindert jeden sichtbaren Bootstrap-Backdrop */
+.modal-backdrop, .offcanvas-backdrop {
+  display: none !important;
+}
+/* Sicherheitsnetz: nichts in der Topbar darf Dropdown clippen */
+.run-icon-center { z-index: 1500; } /* unter dem Menü bleiben */
+
+/* Resizer IMMER über dem Inhalt und klickbar */
+#resizer,
+#resizer-h {
+  position: relative;
+  z-index: 50 !important;
+  pointer-events: auto !important;
+}
+
+/* Falls mal ein Modal-Backdrop bleibt, blockiert trotzdem nicht die Resizer */
+.modal-backdrop {
+  z-index: 1040; /* Standard-Bootstrap; Resizer liegen mit 5000 drüber */
+}
+
+
+.gfx-layer {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+  /* KEINE width/height hier! */
+}
+
+.gfx-layer.show {
+  display: block;
+  z-index: 900;
+  pointer-events: auto;
+}
+
+#canvas-wrap canvas.gfx-layer{
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+
+#canvas-wrap canvas.gfx-layer.show{ display:block; }
+
+#canvas {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* auf deinen Canvas anwenden */
+#pygame-canvas, canvas.pygame-surface {
+  touch-action: none;    /* wichtig für iPad & Firefox */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+ /* Weißer Hintergrund, gelbes Blitz-Icon */
+  .btn-flash-white {
+    background-color: #ffffff !important;
+    border: 2px solid #ffc107 !important; /* Bootstrap-Gelb */
+    color: #ffc107 !important;            /* Blitz-Icon-Farbe */
+    font-size: 1.2em;
+  }
+
+  .btn-flash-white:hover {
+    background-color: #fff9e6 !important
+  }
+
+  /* Topbar robust machen */
+.navbar .container-fluid {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: .5rem;
+}
+
+
+/* Rechte Seite: zusammengefasste Actions stehen rechts */
+.top-actions {
+  flex: 0 0 auto;          /* never grow to fill space */
+  margin-left: .75rem;     /* small gap right of the title */
+  white-space: nowrap;     /* keep the group together */
+}
+
+/* Brand darf NICHT wachsen, sonst entsteht eine große Lücke zum Run-Block */
+.left-group > .d-flex.align-items-center {
+  flex: 0 0 auto;
+}
+
+/* Run/Reset/Calliope direkt neben dem Titel halten */
+.left-group .top-actions {
+  margin-left: .75rem !important;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Buttons sollen nicht über den Titel „drüber schieben“ */
+.top-actions > * {
+  flex: 0 0 auto;           /* keine unerwünschte Schrumpfung einzelner Gruppen */
+}
+
+/* Kleinere Bildschirme: Logo etwas kleiner, Abstände reduzieren */
+@media (max-width: 992px) {
+  #nbpython-logo { height: 48px; }
+}
+@media (max-width: 768px) {
+  #nbpython-logo { height: 42px; }
+  .navbar-brand { font-size: 1.1rem; }
+  .top-actions { gap: .4rem; }
+}
+
+
+
+.tooltip {
+  z-index: 3000 !important;
+}
+
+/* Wrapper-Div: weißer Hintergrund, zentriert den Canvas */
+
+/* Canvas selbst: lightgrey Hintergrund, sichtbarer Rahmen */
+#canvas {
+  background-color: lightgrey;       /* Standard-Hintergrund des Canvas */          /* dunkler Rahmen */
+  display: block;                      /* Block-Element für margin auto etc. */
+  margin: auto;                        /* sicherheitsweise horiz. zentrieren */
+  max-width: 100%;                     /* bei kleinerem Wrapper: passt sich an */
+  max-height: 100%;                    /* bei kleinerem Wrapper: passt sich an */
+  box-sizing: content-box;             /* Rahmen zählt außerhalb der Breite/Höhe */
+}
+
+
+
+/* zentriertes Fenster mit Titelzeile */
+#pygame-frame {
+  display: none;
+  position: relative;
+  background: #fff;
+  border: 2px solid #666;
+  border-radius: 8px;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  flex-direction: column;
+  width: fit-content;
+  height: fit-content;
+}
+
+
+/* ===============================
+   Pygame-Fenster (zentriert im Wrap)
+   =============================== */
+
+/* Rahmen um den Canvas + Titelzeile */
+/* Pygame-Frame: NICHT dehnen, NICHT absolut, exakt so groß wie Canvas */
+#pygame-frame,
+#pygame-frame.gfx-layer {
+  position: relative !important;     /* überschreibt .gfx-layer absolute/inset */
+  inset: auto !important;
+  display: none;                     /* JS blendet bei Start ein */
+  width: auto !important;            /* Größe kommt vom ResizeObserver (Canvas) */
+  height: auto !important;
+  max-height: 100%;                  /* fixed: added space and semicolon */
+  flex: 0 0 auto !important;         /* nicht wachsen, nicht schrumpfen */
+  box-sizing: content-box !important;
+
+  /* Optik */
+  background: #fff;
+  border: 2px solid #666;
+  border-radius: 10px;
+  box-shadow: 0 0 12px rgba(0,0,0,.25);
+  overflow: hidden;
+  margin: auto;                      /* im Wrap zentrieren */
+  pointer-events: auto !important;   /* klickbar trotz .gfx-layer */
+}
+
+/* Wenn die App .show setzt, wollen wir FLEX (Titelzeile + Canvas untereinander) */
+#pygame-frame.gfx-layer.show {
+  display: flex !important;
+  flex-direction: column;
+}
+
+/* Titelzeile-Höhe als Variable (anpassbar) */
+#pygame-frame { --titlebar-h: 44px; }
+#pygame-titlebar { height: var(--titlebar-h); flex: 0 0 var(--titlebar-h); }
+
+/* Canvas füllt den restlichen Platz unter der Titelzeile, ohne Überhöhe */
+#pygame-frame > canvas {
+  flex: 1 1 auto;
+  width: 100%;
+  height: auto;                    /* keine absolute Höhe erzwingen */
+  max-height: calc(100% - var(--titlebar-h));
+  object-fit: contain;
+}
+
+
+/* ===============================
+   Titelzeile
+   =============================== */
+#pygame-titlebar {
+  display: flex;
+  align-items: center;               /* vertikal zentriert */
+  justify-content: space-between;    /* Caption links, X rechts */
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  gap: .75rem;
+  width: 100%;
+  background: #eee;
+  border-bottom: 1px solid #999;
+  padding: 10px 16px;
+  box-sizing: border-box;
+  line-height: 1.2;
+}
+
+/* Caption-Text */
+#pygame-caption {
+  flex: 1 1 auto;                    /* füllt restlichen Platz */
+  min-width: 0;                      /* verhindert Überlauf */
+  display: flex;
+  align-items: center;               /* vertikal zentriert */
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.35rem;
+  color: #333;
+}
+
+/* Close-Button (X) */
+#pygame-close {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;                 /* schiebt Button nach rechts */
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: #c0392b;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, .15) inset;
+  transition: background .15s ease, transform .05s ease;
+}
+
+#pygame-close:hover {
+  background: #a93226;
+}
+
+#pygame-close:active {
+  transform: translateY(1px);
+}
+
+
+/* Kein Rahmen um sichtbare Grafiken */
+#canvas-wrap .gfx-layer.show {
+  outline: none;
+}
+/* ===== CodeMirror 6: iPad Scroll-Fix ===== */
+#left { min-height: 0; } /* wichtig für Scrollen in Flex-Childs */
+
+#editor {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;   /* ohne das blockiert Flex das Scrollen */
+  height: 100%;
+  overflow: hidden; /* Scrollen übernimmt die cm-scroller */
+}
+
+/* CM6-Root soll die volle Höhe bekommen */
+#editor .cm-editor {
+  height: 100%;
+  contain: strict;
+}
+
+/* Der echte Scroll-Container */
+#editor .cm-scroller {
+  height: 100%;
+  overflow: auto !important;
+  -webkit-overflow-scrolling: touch;  /* iOS sanftes Scrollen */
+  touch-action: pan-y pinch-zoom;     /* vertikal scrollen + pinch */
+}
+
+#editor .cm-content { overscroll-behavior: contain; }
+
+/* Sicherheit: nichts blockiert Touch im Editor */
+#editor, #editor * {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default !important;
+  touch-action: auto;
+}
+
+
+ 
+
+
+ 
+
+ 
+
+ 
+/* ===== iPad Fix: Run-Button wieder klickbar machen ===== */
+@media (hover: none) and (pointer: coarse) {
+  /* Button-Gruppe im Flow lassen, aber sicher über evtl. Text/Overlays legen */
+  .run-icon-center {
+    position: relative !important;   /* bleibt im Flex-Flow, aber erlaubt z-index */
+    z-index: 2000 !important;        /* über Brand/Text, unter Dropdowns (3000) */
+  }
+  /* Safety: alle Kinder sind klickbar */
+  .run-icon-center, .run-icon-center * {
+    pointer-events: auto !important;
+  }
+}
+
+/* --- Fix: Run/Reset buttons must never "jump" to the far right on certain widths --- */
+.navbar > .container-fluid {
+  justify-content: flex-start !important; /* override Bootstrap navbar default */
+  flex-wrap: nowrap !important;
+}
+
+.left-group {
+  flex: 0 0 auto;          /* do not grow to fill space */
+  min-width: 0;            /* allow title to shrink */
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.left-group .top-actions,
+.left-group .run-icon-center {
+  flex: 0 0 auto;
+  margin-left: 0 !important; /* guard against any ms-auto/margin rules */
+}
+
+.right-buttons {
+  margin-left: auto !important; /* keep the right block on the far right */
+  flex: 0 0 auto;
+}
+
+/* Ensure help modal is always on top */
+#helpModal {
+  z-index: 2000;
+}
+
+#helpModal .modal-dialog {
+  z-index: 2001;
+}
+
+.modal-backdrop {
+  z-index: 1990;
+}
+
+/* ----- Grid/Kachel-Styles für Startseite -----
+   Falls die Original-Styles fehlen oder Bilder nicht vorhanden sind,
+   sorgen diese Regeln dafür, dass Kacheln sichtbar und lesbar sind. */
+.wrapper {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px;
+  box-sizing: border-box;
+}
+.gridcontainer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.gridcontainer .item {
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.03);
+}
+.gridcontainer .item a {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  color: #222;
+  text-decoration: none;
+  font-weight: 600;
+}
+.gridcontainer .item img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  background: #f4f4f4;
+  border-radius: 6px;
+  flex: 0 0 72px;
+}
+.gridcontainer .item a > img + span,
+.gridcontainer .item a > img + text {
+  /* Wenn Text nach Image steht, sorgt das für gute Lesbarkeit */
+}
+
+/* Fallback: wenn Bild nicht geladen werden kann, verberge das broken-icon */
+.gridcontainer .item img[alt] {
+  background-size: 40% auto;
+}

@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hilfe – SaS (sas_pygame)</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+code { white-space: nowrap; }
+pre code { white-space: pre; }
+.toc a { text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+</style>
+</head>
+
+<body class="bg-white">
+<div class="container p-4">
+
+<div class="d-flex justify-content-between align-items-center mb-0">
+  <h3 class="mb-0">SaS / Shapes &amp; Sprites (<code>sas_pygame</code>)</h3>
+  <a class="btn btn-outline-secondary btn-sm" href="index.html">← Zurück</a>
+</div>
+
+<p class="text-muted mt-3">
+<strong>sas_pygame</strong> ist eine einfache Grafikbibliothek
+(Port von „Shapes and Sprites“), die intern mit <strong>pygame</strong> arbeitet.
+Sie ist in dieser IDE bereits integriert.
+</p>
+
+<div class="alert alert-warning">
+<strong>Wichtig:</strong> Zeichnen und Ereignisverarbeitung funktionieren nur,
+wenn in einer Schleife <code>view.step()</code> aufgerufen wird.
+Die FPS-Begrenzung ist bereits enthalten:
+<code>view.step(60)</code> (Parameter optional).
+</div>
+<div class="alert alert-danger">
+<strong>Achtung (Browser kann hängen):</strong><br>
+Da <code>sas_pygame</code> intern mit <strong>pygame</strong> im Browser arbeitet, kann es bei Endlosschleifen
+oder fehlendem <code>view.step()</code> passieren, dass das gesamte System nicht mehr reagiert.
+<br><br>
+Wenn auch der <strong>Notfall-Reset</strong> nicht funktioniert:
+<ul class="mb-0">
+<li>Browser-Tab neu laden (<strong>Strg + R</strong> bzw. <strong>Cmd + R</strong>)</li>
+<li>Falls nötig: Den Browser-Tab komplett schließen</li>
+<li>Im Extremfall: Browser neu starten</li>
+</ul>
+</div>
+
+<!-- Inhaltsverzeichnis -->
+<div class="card mb-4">
+<div class="card-body">
+<div class="fw-semibold mb-2">Inhalt</div>
+<div class="toc">
+<a href="#quickstart">1) Schnellstart</a><br>
+<a href="#view">2) View</a><br>
+ <a href="#colors">3) Farben</a><br>
+<a href="#objects">4) Shape-Objekte</a><br>
+<a href="#transform">5) Transformationen</a><br>
+<a href="#collision">6) Kollision &amp; contains()</a>
+</div>
+</div>
+</div>
+
+<!-- 1 -->
+<h5 id="quickstart">1) Schnellstart</h5>
+
+<div class="bg-light p-3 border rounded mb-3">
+<pre><code>import sas_pygame as sas
+
+# Hintergrundfarbe als RGB-Tupel (r,g,b)
+view = sas.createView(600, 400, (173, 216, 230), "Hallo SaS")
+
+rect = sas.Rectangle(60, 180, 60, 40, "red")
+
+dx = 4
+while view.running:
+    rect.move(dx, 0)   # Bewegung sichtbar
+    rect.turn(6)       # Drehung sichtbar
+    print(rect.getCenterX(), rect.getCenterY())
+
+    # Am Rand umkehren
+    if rect.getShapeX() < 0 or rect.getShapeX() > 600 - 60:
+        dx = -dx
+
+    view.step(60)
+
+view.quit()</code></pre>
+</div>
+
+<!-- 2 -->
+<h5 id="view">2) View</h5>
+
+<table class="table table-sm table-bordered">
+<tr><th>Funktion</th><th>Bedeutung</th></tr>
+<tr><td><code>sas.createView(w,h,color,title)</code></td><td>Fenster erstellen</td></tr>
+<tr><td><code>view.step(fps=60)</code></td><td>Events verarbeiten + neu zeichnen + FPS-Limit</td></tr>
+<tr><td><code>view.running</code></td><td>False, wenn Fenster geschlossen wird</td></tr>
+<tr><td><code>view.wait(ms)</code></td><td>Pause in Millisekunden</td></tr>
+</table>
+
+<h5>Positions- und Größen-Methoden (get-Methoden)</h5>
+<table class="table table-sm table-bordered">
+<tr><th>Methode</th><th>Bedeutung</th></tr>
+<tr><td><code>getShapeX()</code></td><td>Linke obere X-Position der (transformierten) Form.</td></tr>
+<tr><td><code>getShapeY()</code></td><td>Linke obere Y-Position der (transformierten) Form.</td></tr>
+<tr><td><code>getShapeWidth()</code></td><td>Aktuelle Breite der Form (inkl. Rotation oder Skalierung).</td></tr>
+<tr><td><code>getShapeHeight()</code></td><td>Aktuelle Höhe der Form (inkl. Rotation oder Skalierung).</td></tr>
+<tr><td><code>getCenterX()</code></td><td>X-Koordinate des Mittelpunkts.</td></tr>
+<tr><td><code>getCenterY()</code></td><td>Y-Koordinate des Mittelpunkts.</td></tr>
+</table>
+
+<!-- 3 -->
+<h5 id="colors">3) Farben</h5>
+
+<p>
+Farben kannst du entweder als <strong>Name (String)</strong> oder als <strong>RGB-Tupel</strong> angeben.
+</p>
+
+<h6>Farbnamen (String)</h6>
+<p>Diese Farbnamen stehen zur Verfügung:</p>
+<table class="table table-sm table-bordered w-auto">
+  <tr>
+    <td><code>"black"</code></td>
+    <td><code>"white"</code></td>
+    <td><code>"red"</code></td>
+    <td><code>"green"</code></td>
+    <td><code>"blue"</code></td>
+  </tr>
+  <tr>
+    <td><code>"yellow"</code></td>
+    <td><code>"gray"</code></td>
+    <td><code>"orange"</code></td>
+    <td><code>"purple"</code></td>
+    <td><code>"pink"</code></td>
+  </tr>
+  <tr>
+    <td><code>"magenta"</code></td>
+    <td colspan="4" class="text-muted">(weitere Namen werden ggf. nicht erkannt)</td>
+  </tr>
+</table>
+
+<div class="bg-light p-3 border rounded mb-3">
+<pre><code>ball = sas.Circle(120, 140, 30, "red")
+text = sas.Text(20, 20, "Hallo", "black")</code></pre>
+</div>
+
+<h6>RGB-Tupel</h6>
+<p>
+Ein RGB-Tupel hat die Form <code>(r, g, b)</code> mit Werten von <code>0</code> bis <code>255</code>.
+</p>
+
+<div class="bg-light p-3 border rounded mb-3">
+<pre><code># Hellblau (wie "lightblue") als RGB
+view = sas.createView(600, 400, (173, 216, 230), "Farben")
+
+# Orange als RGB
+r = sas.Rectangle(50, 80, 200, 120, (255, 165, 0))</code></pre>
+</div>
+
+<div class="alert alert-info">
+<strong>Hinweis:</strong> Wenn ein Farbname nicht unterstützt wird, kann die Farbe unerwartet sein.
+Nutze dann besser ein RGB-Tupel.
+</div>
+
+<!-- 4 -->
+<h5 id="objects">4) Shape-Objekte</h5>
+
+<p>Alle Objekte werden automatisch dem View hinzugefügt.</p>
+
+<h6>Rectangle</h6>
+<pre><code>r = sas.Rectangle(50, 80, 200, 120, "green")</code></pre>
+
+<h6>Circle</h6>
+<pre><code>c = sas.Circle(120, 140, 30, "red")</code></pre>
+
+<h6>Ellipse</h6>
+<pre><code>e = sas.Ellipse(200, 200, 140, 60, "blue")</code></pre>
+
+<h6>Text</h6>
+<pre><code>t = sas.Text(20, 20, "Hallo", "black")
+t.setFont(30)</code></pre>
+
+<h6>Polygon</h6>
+<pre><code>p = sas.Polygon([(150,10),(40,100),(140,140)], "yellow")
+
+p2 = sas.Polygon([(150,10)], "orange")
+p2.add(-110, 90)
+p2.add(100, 40)</code></pre>
+
+<h6>Picture (Bildobjekt)</h6>
+
+<p>
+Mit <code>Picture</code> können Bilder wie Shapes verwendet werden.
+Sie unterstützen alle Transformationen.
+</p>
+
+<div class="alert alert-info">
+Bilddateien müssen vorher in der IDE hochgeladen werden.
+</div>
+
+<pre><code>pic = sas.Picture(100, 80, "auto.png")</code></pre>
+
+<h6>Sprite (Gruppe von Shapes)</h6>
+
+<pre><code>ball1 = sas.Circle(100, 100, 20, "red")
+ball2 = sas.Circle(140, 100, 20, "blue")
+
+system = sas.Sprite(ball1)
+system.add(ball2)</code></pre>
+
+<!-- 5 -->
+<h5 id="transform">5) Transformationen</h5>
+
+<p>
+Transformationen verändern Position, Drehung und Größe,
+ohne die Grundwerte (x, y, width, height) direkt zu ändern.
+</p>
+
+<table class="table table-sm table-bordered">
+<tr><th>Methode</th><th>Wirkung</th></tr>
+<tr><td><code>move(dx,dy)</code></td><td>Verschieben</td></tr>
+<tr><td><code>move(distance)</code></td><td>Bewegen in aktueller Richtung</td></tr>
+<tr><td><code>moveTo(x,y)</code></td><td>Absolute Position</td></tr>
+<tr><td><code>turn(angle)</code></td><td>Drehen um Mittelpunkt</td></tr>
+<tr><td><code>turn(x,y,angle)</code></td><td>Drehen um Weltkoordinate</td></tr>
+<tr><td><code>turnTo(angle)</code></td><td>Absolute Richtung</td></tr>
+<tr><td><code>turnTo(x,y)</code></td><td>Auf Punkt ausrichten</td></tr>
+<tr><td><code>scale(sx,sy)</code></td><td>Skalieren (Faktor)</td></tr>
+<tr><td><code>scaleTo(w,h)</code></td><td>Auf Zielgröße skalieren</td></tr>
+<tr><td><code>flipHorizontal()</code></td><td>Horizontal spiegeln</td></tr>
+<tr><td><code>flipVertical()</code></td><td>Vertikal spiegeln</td></tr>
+<tr><td><code>reset()</code></td><td>Transformation zurücksetzen</td></tr>
+<tr><td><code>clone()</code></td><td>Kopie erzeugen</td></tr>
+<tr><td><code>setHidden(True/False)</code></td><td>Ein-/Ausblenden</td></tr>
+</table>
+
+<!-- 6 -->
+<h5 id="collision">6) Kollision &amp; contains()</h5>
+
+<h6>intersects(obj)</h6>
+
+<pre><code>if ball.intersects(wand):
+    print("Kollision!")</code></pre>
+
+<p>Prüft, ob sich zwei Objekte überlappen.</p>
+
+<h6>contains(x,y)</h6>
+
+<pre><code>if ball.contains(150,200):
+    print("Punkt im Objekt")</code></pre>
+
+<p>Prüft, ob ein Punkt im Objekt liegt.</p>
+
+<h6>contains(obj)</h6>
+
+<pre><code>if rechteck.contains(ball):
+    print("Ball vollständig im Rechteck")</code></pre>
+
+<p>Prüft, ob ein Objekt vollständig in einem anderen liegt.</p>
+
+<hr>
+
+<p>
+Nächste Themen:
+<a href="turtle.html">Turtle</a> ·
+<a href="pygame.html">Pygame</a> ·
+<a href="calliope2.html">Calliope 1/2</a> ·
+<a href="calliope3.html">Calliope 3</a>
+</p>
+
+</div>
+</body>
+</html>

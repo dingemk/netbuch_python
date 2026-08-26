@@ -1,0 +1,24 @@
+#fade in - fade out
+#=================================================
+import calliopemini as CM
+import neopixel 
+
+pixel = neopixel.NeoPixel(CM.pin_RGB, 3) 
+
+def fadeIn(delay): 
+    for i in range(0, 256, 2): 
+        pixel.fill((i, 0, 128))
+        pixel.show()
+        CM.sleep(delay)
+
+def fadeOut(delay):
+    for i in range(255, -1, -2):
+        pixel.fill((i, 0, 128))
+        pixel.show()
+        CM.sleep(delay)
+
+while not CM.button_b.was_pressed():
+    fadeIn(30)
+    fadeOut(30)
+
+pixel.clear()

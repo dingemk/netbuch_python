@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+  <meta charset="utf-8" />
+  <title>net-schulbuch-python (Monaco + Pyodide + Turtle)</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="styles.css" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" />
+  <script>
+    /* Fängt ?transferKey=… ganz früh ab und parkt Payload in sessionStorage */
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const key = params.get('transferKey');
+      if (!key) return;
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          sessionStorage.setItem('netbuch.pendingTransfer', raw);
+          localStorage.removeItem(key);
+          // Query-Param weg, damit kein Doppelimport bei Reload
+          history.replaceState(null, '', location.pathname + location.hash);
+        }
+      } catch (e) {
+        console.warn('[transfer/bootstrap] Fehler:', e);
+      }
+    })();
+  </script>
+</head>
+
+<body>
+  <!-- Topbar -->
+  <nav class="navbar navbar-light bg-light border-bottom">
+    <div class="container-fluid d-flex align-items-center flex-nowrap gap-2 justify-content-start">
+      <div class="left-group d-flex align-items-center gap-3 flex-nowrap" style="min-width:0;">
+        <div class="d-flex align-items-center" style="min-width:0;">
+          <img src="nbpython.png" alt="Netbuch Python" id="nbpython-logo"
+            style="height: 60px; vertical-align: middle; margin-right: 10px;">
+          <span class="navbar-brand mb-0 h1 text-truncate" style="max-width: 45vw;">net-schulbuch-python</span>
+        </div>
+
+        <div class="top-actions d-flex align-items-center gap-2 flex-nowrap">
+          <div class="run-icon-center d-flex align-items-center gap-2">
+            <button id="run-icon" type="button" class="btn btn-success" data-bs-toggle="tooltip"
+              title="Programm starten (Shift + Enter)">
+              <i class="bi bi-play-fill"></i>
+            </button>
+            <button id="emergency-reset-btn" type="button" class="btn btn-danger" data-bs-toggle="tooltip"
+              title="Notfall-Reset">
+              <i class="bi bi-exclamation-triangle-fill"></i>
+            </button>
+            <button id="connect-toggle-btn" type="button" class="btn btn-outline-secondary" data-bs-toggle="tooltip"
+              title="Verbinden">
+              <i class="bi bi-plug"></i>
+            </button>
+            <button id="flash-btn" type="button" class="btn btn-secondary" data-bs-toggle="tooltip"
+              title="Flashen / Firmware laden">
+              <i class="bi bi-lightning-charge-fill"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-buttons d-flex align-items-center gap-2 ms-auto">
+        <button id="save-png-btn" class="btn btn-info btn-sm text-white" disabled type="button">📋 Bild
+          kopieren</button>
+        <!-- Löschen -->
+        <div class="dropdown" id="clear-dropdown">
+          <button class="btn btn-outline-secondary btn-sm" type="button" id="clear-dropdown-btn" aria-expanded="false"
+            data-bs-toggle="dropdown">Löschen ▼</button>
+          <div class="dropdown-menu" id="clear-dropdown-menu" role="menu">
+            <a class="dropdown-item" href="#" id="clear-editor-btn" role="menuitem">Editor löschen</a>
+            <a class="dropdown-item" href="#" id="clear-canvas-btn" role="menuitem">Leinwand löschen</a>
+            <a class="dropdown-item" href="#" id="clear-output-btn" role="menuitem">Ausgabe löschen</a>
+            <div class="dropdown-divider"></div>
+            <a class="dropdown-item text-danger" href="#" id="clear-all-btn" role="menuitem">Alles löschen</a>
+          </div>
+        </div>
+
+        <!-- Menü -->
+        <div class="dropdown" id="hamburger-dropdown">
+          <button id="hamburger-btn" class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
+            data-bs-toggle="dropdown" data-bs-auto-close="outside" data-bs-display="static" data-bs-container="body"
+            aria-expanded="false">☰</button>
+
+          <div class="dropdown-menu dropdown-menu-end" id="hamburger-menu" role="menu" style="min-width:240px;"
+            aria-labelledby="hamburger-btn">
+            <a class="dropdown-item" href="#" id="load-program-btn" role="menuitem">Programm öffnen</a>
+            <a class="dropdown-item" href="#" id="save-program-btn" role="menuitem">Programm speichern</a>
+
+            <a class="dropdown-item" href="#" id="examples-btn" role="menuitem" data-bs-toggle="modal"
+              data-bs-target="#examplesModal">📚 Beispiele</a>
+
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-header">Dateien</div>
+            <label for="file-input" class="dropdown-item" style="cursor:pointer;">
+              <input id="file-input" type="file" class="visually-hidden" multiple />
+              📁 Dateien hochladen
+            </label>
+
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-header">Layout</div>
+            <div class="px-3 py-2">
+              <select id="layout-select" class="form-select form-select-sm">
+                <option value="output" selected>Output</option>
+                <option value="canvas-output">Canvas + Output</option>
+                <option value="output-files">Output + Dateien</option>
+                <option value="canvas-output-files">Canvas + Output + Dateien</option>
+              </select>
+            </div>
+
+            <div class="dropdown-divider"></div>
+            <div class="dropdown-header">Hardware</div>
+            <div class="px-3 py-2">
+              <select id="device-select" class="form-select form-select-sm">
+                <option value="none" selected>keine Hardware</option>
+                <option value="c12">Calliope mini 1/2</option>
+                <option value="c3">Calliope mini 3</option>
+              </select>
+            </div>
+
+            <div class="dropdown-divider"></div>
+            <a class="dropdown-item" href="#" id="hilfe-btn" role="menuitem">📄 Hilfe</a>
+            <a class="dropdown-item" href="#" id="licenses-btn" role="menuitem">📄 Lizenzen</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hauptbereich -->
+  <div id="workarea">
+    <div id="left">
+      <div id="editor"></div>
+    </div>
+    <div id="resizer" role="separator" aria-orientation="vertical" aria-label="Größenanpassung"></div>
+    <div id="right">
+      <div id="canvas-wrap">
+        <canvas id="turtleCanvas" class="gfx-layer"></canvas>
+        <canvas id="canvas" class="gfx-layer"></canvas>
+        <canvas id="mplCanvas" class="gfx-layer"></canvas>
+      </div>
+      <div id="resizer-h" role="separator" aria-orientation="horizontal" aria-label="Größenanpassung"></div>
+      <div id="output"></div>
+      <div id="files-panel" style="display:none;">
+        <div class="p-3">
+          <h6>Hochgeladene Dateien:</h6>
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Pfad</th>
+                <th class="text-end">Größe</th>
+                <th>Typ</th>
+                <th class="text-center">Aktion</th>
+              </tr>
+            </thead>
+            <tbody id="files-tbody">
+              <tr>
+                <td colspan="4"><em>Lade...</em></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Beispiele Modal -->
+  <div class="modal fade" id="examplesModal" tabindex="-1" aria-labelledby="examplesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="examplesModalLabel">📚 Turtle-Beispiele</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row" id="examples-grid"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+          <button type="button" class="btn btn-primary" id="load-example-btn">Programm laden</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="helpModal" tabindex="-1" aria-labelledby="helpModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="helpModalLabel">Hilfe & Handbuch</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Schließen"></button>
+        </div>
+        <div class="modal-body p-0">
+          <iframe id="helpFrame" src="" style="width:100%;height:70vh;border:0;"></iframe>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="licensesModal" tabindex="-1" aria-labelledby="licensesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="licensesModalLabel">📄 Lizenzen</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="license-section mb-4">
+            <h6>🎯 net-schulbuch-python IDE</h6>
+            <p><strong>Lizenz:</strong> Für nichtkommerzielle Zwecke kostenlos nutzbar</p>
+            <p><strong>Entwickler:</strong> Klaus Dingemann</p>
+            <p><strong>Beschreibung:</strong> Eine browserbasierte Python-IDE mit Turtle-Grafik, entwickelt für den
+              Schulunterricht.</p>
+          </div>
+
+          <div class="license-section mb-4">
+            <h6>🐍 Python</h6>
+            <p><strong>Lizenz:</strong> Python Software Foundation License (PSF)</p>
+            <p><strong>Website:</strong> <a href="https://www.python.org/" target="_blank">https://www.python.org/</a>
+            </p>
+            <p><strong>Beschreibung:</strong> Python ist eine Programmiersprache, die in dieser IDE über Pyodide
+              ausgeführt wird.</p>
+          </div>
+
+          <div class="license-section mb-4">
+            <h6>⚡ Pyodide</h6>
+            <p><strong>Lizenz:</strong> Mozilla Public License 2.0 (MPL 2.0)</p>
+            <p><strong>Website:</strong> <a href="https://pyodide.org/" target="_blank" rel="noopener noreferrer">https://pyodide.org/</a></p>
+            <p><strong>Beschreibung:</strong> Pyodide ist eine Python-Distribution für den Browser, die CPython zu WebAssembly kompiliert.
+              Pyodide kann zusätzlich weitere Open-Source-Pakete (z.&nbsp;B. numpy/pandas/matplotlib/pygame-ce u.&nbsp;a.) laden, die jeweils eigene Lizenzen haben.</p>
+          </div>
+
+          <div class="license-section mb-4">
+            <h6>📝 Monaco Editor</h6>
+            <p><strong>Lizenz:</strong> MIT License</p>
+            <p><strong>Website:</strong> <a href="https://microsoft.github.io/monaco-editor/"
+                target="_blank">https://microsoft.github.io/monaco-editor/</a></p>
+            <p><strong>Beschreibung:</strong> Monaco Editor ist der Code-Editor, der in Visual Studio Code verwendet
+              wird.</p>
+          </div>
+
+          <div class="license-section mb-4">
+            <h6>🎨 Bootstrap</h6>
+            <p><strong>Lizenz:</strong> MIT License</p>
+            <p><strong>Website:</strong> <a href="https://getbootstrap.com/"
+                target="_blank">https://getbootstrap.com/</a></p>
+            <p><strong>Beschreibung:</strong> Bootstrap ist ein CSS-Framework für responsive Webdesign.</p>
+          </div>
+
+          <div class="license-section mb-4">
+            <h6>🌐 CDNs / Auslieferung</h6>
+            <p><strong>Hinweis:</strong> Einige Bibliotheken werden über externe CDNs geladen.</p>
+            <p><strong>jsDelivr:</strong> MIT License – <a href="https://www.jsdelivr.com/" target="_blank" rel="noopener noreferrer">https://www.jsdelivr.com/</a></p>
+            <p><strong>cdnjs:</strong> (CDN) – <a href="https://cdnjs.com/" target="_blank" rel="noopener noreferrer">https://cdnjs.com/</a></p>
+            <p><strong>Skypack CDN:</strong> (CDN) – <a href="https://www.skypack.dev/" target="_blank" rel="noopener noreferrer">https://www.skypack.dev/</a></p>
+          </div>
+
+          <div class="license-section mb-4">
+            <h6>🔌 DAPjs</h6>
+            <p><strong>Lizenz:</strong> Apache License 2.0</p>
+            <p><strong>Website:</strong> <a href="https://github.com/ARMmbed/dapjs" target="_blank" rel="noopener noreferrer">https://github.com/ARMmbed/dapjs</a></p>
+            <p><strong>Beschreibung:</strong> JavaScript-Bibliothek für WebUSB / DAPLink (z.&nbsp;B. für Calliope mini).</p>
+          </div>
+
+          <div class="license-section mb-4">
+            <h6>💾 microbit-fs / microbit-connection</h6>
+            <p><strong>Lizenz:</strong> Apache License 2.0</p>
+            <p><strong>Website:</strong> <a href="https://github.com/microbit-foundation/microbit-fs" target="_blank" rel="noopener noreferrer">https://github.com/microbit-foundation/microbit-fs</a>
+              &nbsp;·&nbsp; <a href="https://github.com/microbit-foundation/microbit-connection" target="_blank" rel="noopener noreferrer">https://github.com/microbit-foundation/microbit-connection</a></p>
+            <p><strong>Beschreibung:</strong> Bibliotheken zum Erzeugen von MicroPython-HEX-Dateien und Flashen per WebUSB.</p>
+          </div>
+
+          <div class="license-section mb-4">
+            <h6>📊 Python-Bibliotheken (über Pyodide)</h6>
+            <p><strong>Hinweis:</strong> Je nach Programm werden in der IDE weitere Pakete nachgeladen. Beispiele:</p>
+            <p><strong>pandas:</strong> BSD 3-Clause License</p>
+            <p><strong>numpy:</strong> BSD 3-Clause License</p>
+            <p><strong>matplotlib:</strong> Python Software Foundation License (PSF)</p>
+            <p><strong>pygame-ce:</strong> MIT License (Community Edition)</p>
+            <p><strong>micropip:</strong> Mozilla Public License 2.0 (MPL 2.0)</p>
+            <p><strong>Beschreibung:</strong> Diese Bibliotheken werden im Browser über Pyodide geladen und stehen u.&nbsp;a. für Datenverarbeitung, Visualisierung und Pygame zur Verfügung.</p>
+          </div>
+
+          <div class="license-section mb-4">
+            <h6>📌 Hinweis zu Lizenztexten</h6>
+            <p class="mb-0">Die vollständigen Lizenztexte und Copyright-Hinweise finden sich in den jeweiligen Projekten (Links oben).
+              Sollten in dieser Übersicht Angaben fehlen oder sich ändern, gelten die Original-Lizenzen der jeweiligen Projekte.</p>
+          </div>
+
+          <div class="license-section mb-4">
+            <h6>🔒 Nutzungsbedingungen</h6>
+            <p><strong>Nichtkommerzielle Nutzung:</strong> Diese Software darf für Bildungszwecke, private Projekte und
+              nichtkommerzielle Anwendungen kostenlos genutzt werden.</p>
+            <p><strong>Kommerzielle Nutzung:</strong> Für kommerzielle Zwecke ist eine separate Lizenzvereinbarung
+              erforderlich.</p>
+            <p><strong>Haftungsausschluss:</strong> Die Software wird "wie besehen" bereitgestellt, ohne Gewährleistung
+              jeglicher Art.</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Modal für Datenschutz -->
+  <div class="modal fade" id="datenschutzModal" tabindex="-1" aria-labelledby="datenschutzModalLabel"
+    aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+
+        <div class="modal-header">
+          <h5 class="modal-title" id="datenschutzModalLabel">
+            🔒 Datenschutzerklärung
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <div class="modal-body">
+
+          <p class="text-muted mb-3">
+            für <strong>python.net-schulbuch.de</strong> –
+            Stand: <strong>Februar 2026</strong>
+          </p>
+
+          <div class="alert alert-info">
+            <strong>Kurzüberblick:</strong>
+            Diese Python-IDE läuft im Browser.
+            Programmcode wird grundsätzlich lokal verarbeitet.
+            Es gibt keine Registrierung und keine Tracking-Tools.
+          </div>
+
+          <h6>1. Verantwortlicher</h6>
+          <div class="border rounded p-3 mb-4">
+            <p class="mb-1">
+              <strong>net-schulbuch.de gemeinnützige UG (haftungsbeschränkt)</strong>
+            </p>
+            <p class="mb-1">
+              Poststraße 38<br>
+              49477 Ibbenbüren<br>
+              Deutschland
+            </p>
+            <p class="mb-1">
+              Telefon:
+              <a href="tel:+491712672373">+49 171 267 23 73</a>
+            </p>
+            <p class="mb-1">
+              E-Mail:
+              <a href="mailto:info@net-schulbuch.de">
+                info@net-schulbuch.de
+              </a>
+            </p>
+            <p class="mb-0">
+              Geschäftsführer: Berthold Hufnagel
+            </p>
+          </div>
+
+          <h6>2. Allgemeine Hinweise</h6>
+          <p>
+            Personenbezogene Daten werden nur verarbeitet,
+            soweit dies zur technischen Bereitstellung
+            der Website erforderlich ist oder Sie uns
+            freiwillig kontaktieren.
+          </p>
+
+          <ul>
+            <li>Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse)</li>
+            <li>Art. 6 Abs. 1 lit. b DSGVO (Vertrag / Nutzung)</li>
+            <li>Art. 6 Abs. 1 lit. a DSGVO (Einwilligung)</li>
+          </ul>
+
+          <h6>3. Hosting (IONOS) & Server-Logfiles</h6>
+
+          <p>
+            Diese Website wird bei einem deutschen Hosting-Anbieter betrieben.
+            Beim Aufruf werden automatisch Server-Logfiles verarbeitet.
+          </p>
+
+          <div class="border rounded p-3 mb-4 bg-light">
+            <p class="mb-1">
+              <strong>Hosting-Anbieter:</strong><br>
+              IONOS SE<br>
+              Elgendorfer Str. 57<br>
+              56410 Montabaur<br>
+              Deutschland
+            </p>
+
+            <p class="mb-1">
+              <strong>Serverstandort:</strong>
+              Deutschland / EU
+            </p>
+
+            <p class="mb-1">
+              <strong>Auftragsverarbeitung:</strong>
+              Es besteht ein Vertrag zur Auftragsverarbeitung
+              gemäß Art. 28 DSGVO.
+            </p>
+
+            <p class="mb-1">
+              <strong>Speicherdauer der Server-Logs:</strong>
+              14 Tage
+            </p>
+
+            <p class="mb-0">
+              <strong>Rechtsgrundlage:</strong>
+              Art. 6 Abs. 1 lit. f DSGVO
+            </p>
+          </div>
+
+          <h6>4. Python-IDE im Browser</h6>
+          <p>
+            Der eingegebene Python-Code wird
+            ausschließlich lokal im Browser verarbeitet.
+            Eine automatische serverseitige Speicherung
+            erfolgt nicht.
+          </p>
+
+          <h6>5. Lokale Speicherung (LocalStorage)</h6>
+          <p>
+            Einstellungen und Editor-Inhalte können
+            lokal im Browser gespeichert werden.
+            Diese Daten verbleiben auf Ihrem Endgerät.
+          </p>
+
+          <h6>6. Datei-Upload</h6>
+          <p>
+            Hochgeladene Dateien werden lokal im
+            virtuellen Dateisystem des Browsers verarbeitet.
+            Es erfolgt keine automatische Speicherung
+            auf dem Server.
+          </p>
+
+          <h6>7. Externe CDNs (jsDelivr)</h6>
+          <p>
+            Bibliotheken wie Bootstrap oder Pyodide
+            werden über jsDelivr geladen.
+            Dabei kann Ihre IP-Adresse
+            an den CDN-Anbieter übertragen werden.
+          </p>
+
+          <h6>8. WebUSB / WebSerial</h6>
+          <p>
+            Verbindungen zu Hardware (z. B. Calliope mini)
+            erfolgen ausschließlich zwischen Browser
+            und Gerät.
+          </p>
+
+          <h6>9. Ihre Rechte</h6>
+          <ul>
+            <li>Auskunft (Art. 15 DSGVO)</li>
+            <li>Berichtigung (Art. 16 DSGVO)</li>
+            <li>Löschung (Art. 17 DSGVO)</li>
+            <li>Einschränkung (Art. 18 DSGVO)</li>
+            <li>Widerspruch (Art. 21 DSGVO)</li>
+          </ul>
+
+          <h6>10. Datensicherheit</h6>
+          <p>
+            Die Übertragung erfolgt verschlüsselt
+            über HTTPS.
+          </p>
+
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+            Schließen
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  <!-- Modal für Impressum -->
+  <div class="modal fade" id="impressumModal" tabindex="-1" aria-labelledby="impressumModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="impressumModalLabel">🏢 Impressum</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="impressum-section mb-4">
+            <h6>🏢 Unternehmensangaben</h6>
+            <p><strong>Firmenname:</strong> net-schulbuch.de gemeinnützige UG (haftungsbeschränkt)</p>
+            <p><strong>Adresse:</strong> Poststraße 38<br>49477 Ibbenbüren</p>
+            <p><strong>Telefon:</strong> <a href="tel:+491712672373">+49 171 267 23 73</a></p>
+            <p><strong>E-Mail:</strong> <a href="mailto:info@net-schulbuch.de">info@net-schulbuch.de</a></p>
+            <p><strong>Internet:</strong> <a href="https://www.net-schulbuch.de"
+                target="_blank">www.net-schulbuch.de</a></p>
+          </div>
+
+          <div class="impressum-section mb-4">
+            <h6>📋 Rechtsform</h6>
+            <p>NET-Schulbuch.de ist eine gemeinnützige Unternehmergesellschaft - gUG (haftungsbeschränkt) nach dem GmbHG
+              vom 1. November 2008</p>
+            <p><strong>Geschäftsführer der Gesellschaft ist Berthold Hufnagel</strong><br>
+              E-Mail: <a href="mailto:hufnagel@net-schulbuch.de">hufnagel@net-schulbuch.de</a></p>
+          </div>
+
+          <div class="impressum-section mb-4">
+            <h6>🐛 Fehlermeldungen</h6>
+            <p>Fehlermeldungen bitte an: <a href="mailto:klaus@dingemann.de">klaus@dingemann.de</a></p>
+          </div>
+
+          <div class="impressum-section mb-4">
+            <h6>📚 Unsere digitalen Schulbücher</h6>
+            <p>Ausführliche Anleitungen zu dieses Software finden Sie in dem digitalen Schulbuch für das Fach Informatik
+              im Wahlplichtbereich</p>
+            <p><a href="https://ifwp.net-schulbuch.de" target="_blank">https://ifwp.net-schulbuch.de</a></p>
+            <p>Wir empfehlen unsere digitalen Schulbücher für den Mathematik- und Informatikunterricht:</p>
+            <ul>
+              <li><strong>Informatik 5/6</strong> (als Schulbuch in NRW genehmigt) - <a
+                  href="https://if56.net-schulbuch.de" target="_blank">https://if56.net-schulbuch.de</a></li>
+              <li><strong>Informatik S II</strong> - <a href="https://if2.net-schulbuch.de"
+                  target="_blank">https://if2.net-schulbuch.de</a></li>
+              <li><strong>Mathematik S II</strong> - <a href="https://m2.net-schulbuch.de"
+                  target="_blank">https://m2.net-schulbuch.de</a></li>
+            </ul>
+            <p>Weitere kostenlose Tools für den Informatik- und Mathematikunterricht finden Sie hier:</p>
+            <p><a href="https://net-schulbuch.de/tools">Tools für den Informatikunterricht</a></p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Schließen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS (Bundle) – AMD kurz deaktivieren, damit kein RequireJS greift -->
+  <script>
+    (function () { window.__saved_define__ = window.define; try { window.define = undefined; } catch { } })();
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    (function () { if (window.__saved_define__) window.define = window.__saved_define__; try { delete window.__saved_define__; } catch { } })();
+  </script>
+
+  <!-- Monaco (einmalig) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+  <!--
+<script>
+  require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs" } });
+  require(["vs/editor/editor.main"], function () {
+    const startCode = sessionStorage.getItem('pythonide-editor-content') || "";
+    window.editor = monaco.editor.create(document.getElementById("editor"), {
+      value: startCode, language: "python", theme: "vs", automaticLayout: true, fontSize: 14
+    });
+    console.log("Monaco Editor erfolgreich initialisiert");
+  });
+</script>
+-->
+
+  <!-- Pyodide + Turtle -->
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.29.0/full/pyodide.js"></script>
+
+  <script src="turtle.js"></script>
+
+
+  <!-- DAPjs (WebUSB) -->
+  <script type="module">
+    import * as DAPjs from 'https://cdn.skypack.dev/dapjs@2.2.0';
+    window.DAPjs = DAPjs;
+    window.DAPLink = DAPjs.DAPLink;
+    window.WebUSB = DAPjs.WebUSB;
+    window.CortexM = DAPjs.CortexM;
+    console.log('[boot] DAPjs geladen');
+  </script>
+
+  <script>
+    /* Shim: requestDevice() → nur beim ersten Mal Picker öffnen, sonst Cache benutzen.
+       Alt/Option-Klick kann den Picker erzwingen. */
+
+    (function usbPickerOnce() {
+      if (!navigator.usb?.requestDevice || !navigator.usb?.getDevices) return;
+
+      const orig = navigator.usb.requestDevice.bind(navigator.usb);
+
+      // Überschreibe requestDevice:
+      navigator.usb.requestDevice = async (filters) => {
+        try {
+          // 1) Schon autorisierte Geräte holen (persistiert zwischen Sessions!)
+          const granted = await navigator.usb.getDevices();
+          if (granted && granted.length) {
+            // Falls Filter übergeben wurden, nimm das erste passende Gerät
+            const match = (Array.isArray(filters?.filters) ? filters.filters : [])
+              .length
+              ? granted.find(d =>
+                filters.filters.some(f =>
+                  (f.vendorId ? d.vendorId === f.vendorId : true) &&
+                  (f.productId ? d.productId === f.productId : true)
+                )
+              )
+              : granted[0];
+
+            if (match) {
+              // → Kein Picker nötig, direkt das autorisierte Gerät zurückgeben
+              return match;
+            }
+          }
+        } catch (e) {
+          console.warn('[usbPickerOnce] getDevices() check skipped:', e);
+        }
+
+        // 2) Keine passende Autorisierung vorhanden → normaler Picker
+        return await orig(filters);
+      };
+
+      console.log('[usb-picker-once] aktiv (getDevices→silent reuse, sonst Picker)');
+    })();
+
+  </script>
+
+  <script>
+    // Gerätwechsel-Helper: Cache leeren / Picker erzwingen / sauber trennen
+    window.NetbuchHW = {
+      onDeviceChange(prev, next) {
+        // Wenn wir von C3 weg wechseln → WebUSB aufräumen + Cache leeren
+        if (prev === 'c3' && next !== 'c3') {
+          try { window.CalliopeHex?.disconnectWebUSB?.(); } catch { }
+          try { window.clearUsbPickerCache?.(); } catch { }
+        }
+        // Wenn wir zu C3 wechseln → Cache leeren und Picker beim nächsten Flash erzwingen,
+        // damit das neue Board autorisiert wird.
+        if (next === 'c3') {
+          try { window.clearUsbPickerCache?.(); } catch { }
+        }
+      }
+    };
+  </script>
+  <script>
+    // Geräteselect → Calliope-Target setzen + NetbuchHW-Hook + globaler Setter
+    (function deviceWiring() {
+      const sel = document.getElementById('device-select');
+
+      function applyDevice(val) {
+        const prev = (localStorage.getItem('ui.device') || sel?.value || 'none');
+        try { localStorage.setItem('ui.device', val); } catch { }
+
+        // Calliope-Ziel wirklich umschalten
+        if (val === 'c12') { window.CalliopeHex?.setTargetC12?.(); }
+        else if (val === 'c3') { window.CalliopeHex?.setTargetC3?.(); }
+        else { /* none → neutral */ }
+
+        // USB/Caches etc.
+        if (window.NetbuchHW?.onDeviceChange) {
+          try { window.NetbuchHW.onDeviceChange(prev, val); } catch (e) { console.warn(e); }
+        }
+      }
+
+      sel?.addEventListener('change', () => applyDevice(sel.value));
+
+      // Beim Laden: zuerst aus localStorage wiederherstellen (falls vorhanden)
+      if (sel) {
+        let saved = null;
+        try { saved = localStorage.getItem('ui.device'); } catch { }
+        if (saved && [...sel.options].some(o => o.value === saved)) {
+          sel.value = saved;                      // Select optisch setzen
+        }
+        applyDevice(sel.value);                   // dann EINMAL anwenden (Targets/Hooks)
+      }
+
+      // Globaler zuverlässiger Setter (wird von scripts.js benutzt)
+      window.__setDeviceAndFire = function (val) {
+        if (!sel) { applyDevice(val); return; } // failsafe
+        sel.value = val;
+        sel.dispatchEvent(new Event('input', { bubbles: true }));
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      };
+    })();
+  </script>
+
+  <!-- microbit-fs (UMD) -->
+  <script src="vendor/microbit-fs/dist/microbit-fs.umd.js"></script>
+
+  <!-- Calliope-Tools & Serial -->
+  <script type="module" src="calliope-hex-tools.js"></script>
+  <script src="calliope.serial.js"></script>
+  <script>
+    (function wireSerialToOutput() {
+      const out = document.getElementById('output');
+      const noise = /^(MicroPython .+|Type "help\(\)" for more information\.)$/;
+
+      const logLine = (t) => {
+        if (!out) return;
+        const s = String(t || '').trim();
+        if (!s || noise.test(s)) return;           // Banner & leere Zeilen ignorieren
+        out.insertAdjacentHTML('beforeend', `<div>${s.replace(/\r?\n/g, '<br>')}</div>`);
+        out.scrollTop = out.scrollHeight;
+      };
+
+      if (window.CalliopeSerial) {
+        try {
+          // neue API bevorzugt: onLine(fn)
+          CalliopeSerial.onLine(logLine);
+        } catch {
+          // Fallback: alte Property-API
+          CalliopeSerial.onLine = logLine;
+        }
+      }
+    })();
+  </script>
+  <!-- Calliope Builder & Flasher -->
+  <script src="calliope.hex.js"></script>
+
+  <!-- Shim für ältere Aufrufe -->
+  <script>
+    (function () {
+      if (window.CalliopeHex && typeof CalliopeHex.fastFlashC3 !== 'function') {
+        window.CalliopeHex.fastFlashC3 = (opts) => CalliopeHex.buildAndFlashWebUSB(opts || {});
+        console.log('[shim] fastFlashC3 → buildAndFlashWebUSB');
+      }
+    })();
+  </script>
+
+  <!-- CalliopeHex initialisieren (Ausgabe + Firmwarepfade) -->
+  <script>
+    (function initCalliopeHex() {
+      const out = document.getElementById('output');
+      const fw = {
+        c12: 'firmware/calliope12-micropython.hex',
+        c3: 'firmware/calliope-v3-correct.hex'
+      };
+      function go() {
+        try { window.CalliopeHex?.init?.({ outEl: out, firmwareUrls: fw }); }
+        catch (e) { console.error('CalliopeHex init fehlgeschlagen:', e); }
+      }
+      if (window.CalliopeHex) go(); else setTimeout(go, 80);
+    })();
+  </script>
+
+  <!-- Connect-Button -->
+  <script>
+    (function topbarButtons() {
+      const outEl = document.getElementById('output');
+      const connectBtn = document.getElementById('connect-toggle-btn');
+      if (!connectBtn) return;
+
+      const log = (m, cls = 'text-muted') => {
+        outEl?.insertAdjacentHTML('beforeend', `<div class="${cls}">${m}</div>`);
+        outEl?.scrollTo?.(0, outEl.scrollHeight);
+      };
+
+
+
+
+      function updateConnectUI() {
+        const connected = !!window.CalliopeSerial?.isOpen?.();
+        // Farben (Button-Styles)
+        connectBtn.classList.toggle('btn-outline-secondary', !connected);
+
+        // Icon innerhalb des Buttons wechseln
+        const icon = connectBtn.querySelector("i");
+        if (icon) {
+          icon.className = connected ? "bi bi-plug-fill" : "bi bi-plug";
+        }
+
+        // Tooltip / Title aktualisieren
+        connectBtn.title = connected ? "Trennen" : "Verbinden";
+        // Tooltip-Text aktualisieren
+        const tip = bootstrap.Tooltip.getInstance(connectBtn)
+          || new bootstrap.Tooltip(connectBtn, { container: 'body' });
+        tip.setContent({ '.tooltip-inner': connectBtn.getAttribute('title') });
+      }
+
+      window.__updateConnectUI = updateConnectUI;
+
+
+      connectBtn.addEventListener('click', async (e) => {
+        if (!window.CalliopeSerial) { log('❌ CalliopeSerial nicht geladen.', 'text-danger'); return; }
+        connectBtn.disabled = true;
+        try {
+          if (!window.CalliopeSerial.isOpen()) {
+            // Picker IMMER zeigen, damit es klar ist, welches Gerät gewählt wird
+            const mode = e.altKey ? 'repl' : 'monitor';
+            console.info('[UI] Verbinden geklickt → öffne Serial-Picker …');
+            await CalliopeSerial.openSerial({ mode, forcePicker: true });
+          } else {
+            console.info('[UI] Trennen geklickt → schließe Serial …');
+            await CalliopeSerial.closeSerial();
+
+          }
+        } catch (err) {
+          log(`❌ ${err?.message || err}`, 'text-danger');
+        } finally {
+          window.__updateConnectUI?.();
+          connectBtn.disabled = false;
+        }
+      });
+
+    })();
+  </script>
+
+  <!-- Flash-Button (C12 → Download, C3 → WebUSB Full/Fast via microbit-connection) -->
+  <script type="module">
+    import { MicropythonFsHex } from "https://cdn.jsdelivr.net/npm/@microbit/microbit-fs/+esm";
+    import { createWebUSBConnection } from "https://cdn.jsdelivr.net/npm/@microbit/microbit-connection/+esm";
+
+    // Quelle für Python-Code: Monaco → <textarea id="py"> → Session/LocalStorage
+    function getPyText() {
+      try {
+        if (window.editor?.getValue) {
+          const v = String(window.editor.getValue() || "");
+          if (v.trim()) return v.trim();
+        }
+      } catch { }
+      try {
+        const ta = document.getElementById('py');
+        if (ta && String(ta.value || '').trim()) return String(ta.value).trim();
+      } catch { }
+      try {
+        const s = sessionStorage.getItem('pythonide-editor-content') || localStorage.getItem('pythonide-editor-content') || '';
+        if (String(s).trim()) return String(s).trim();
+      } catch { }
+      return '';
+    }
+
+    (function wireFlashButton() {
+      const outEl = document.getElementById('output');
+      outEl.innerHTML = ""
+      const flashBtn = document.getElementById('flash-btn');
+      if (!flashBtn) return;
+
+      const log = (m, cls = 'text-muted') => {
+        outEl?.insertAdjacentHTML('beforeend', `<div class="${cls}">${m}</div>`);
+        outEl?.scrollTo?.(0, outEl.scrollHeight);
+      };
+
+      function resolveTarget() {
+        const sel = document.getElementById('device-select');
+        if (sel && (sel.value === 'c12' || sel.value === 'c3')) return sel.value;
+        if (window.CalliopeHex?.getTarget) {
+          const t = CalliopeHex.getTarget();
+          if (t === 'c12' || t === 'c3') return t;
+        }
+        return 'c12';
+      }
+
+      // --- Helper für Calliope 3 ---
+      const BASE_HEX_C3 = "firmware/calliope-v3-correct.hex";
+      const flagKeyFor = (serialOrTag = "global") => `c3:first_full_done:${serialOrTag}`;
+
+      async function buildFullHex(pyText) {
+        const r = await fetch(BASE_HEX_C3, { cache: "no-store" });
+        if (!r.ok) throw new Error(`HTTP ${r.status} – ${BASE_HEX_C3}`);
+        const baseHex = await r.text();
+        const fs = new MicropythonFsHex(baseHex);
+        fs.write("main.py", pyText);
+        return fs.getIntelHex();
+      }
+      async function getSerialTag(usb) {
+        try {
+          const d = usb?.transport?.device || usb?.device;
+          return d?.serialNumber || "global";
+        } catch { return "global"; }
+      }
+
+      // Fortschritt nur in groben Stufen loggen:
+      // full  → 0/20/40/60/80/100
+      // fast  → 0/50/100
+      function makeStepProgressLogger(kind, log) {
+        const steps = (kind === 'full') ? [0, 20, 40, 60, 80, 100] : [0, 50, 100];
+        let last = -1;
+
+        return (p) => {
+          if (typeof p !== 'number' || !isFinite(p)) return;
+          const pc = Math.max(0, Math.min(100, Math.round(p <= 1 ? p * 100 : p)));
+
+          // alle noch nicht geloggten Schritte bis zum aktuellen Prozentstand ausgeben
+          for (const s of steps) {
+            if (s > last && s <= pc) {
+              log(`… ${s}%`);
+              last = s;
+            }
+          }
+        };
+      }
+
+      window.reopenSerialWhenReady ??= async function reopenSerialWhenReady(
+        { timeout = 15000, preferSame = false, mode = 'monitor', onLog = null } = {}
+      ) {
+        const log = (m) => { try { onLog?.(m); } catch { } };
+
+        if (!('serial' in navigator)) {
+          log('ℹ️ Web Serial wird von diesem Browser nicht unterstützt.');
+          return false;
+        }
+        let didUI = false;
+        const start = performance.now();
+        const samePortInfo = (port) => {
+          try {
+            const a = port.getInfo?.() || {};
+            const b = window.CalliopeSerial?.port?.getInfo?.() || null;
+            return preferSame && b ? (a.usbVendorId === b.usbVendorId && a.usbProductId === b.usbProductId) : true;
+          } catch { return true; }
+        };
+
+        // Sofortiger Direktversuch
+        try {
+          const ports = await navigator.serial.getPorts();
+          for (const p of ports) {
+            if (!samePortInfo(p)) continue;
+            try {
+              await window.CalliopeSerial?.openSerial?.({ port: p, mode });
+              log('✅ Serielle Verbindung wiederhergestellt.');
+              if (!didUI) {
+                didUI = true;
+                window.__updateConnectUI?.();
+              }
+              return true;
+            } catch { /* später nochmal */ }
+          }
+        } catch { }
+
+        // Wiederholt auf Neu-Enumerierung warten
+        while (performance.now() - start < timeout) {
+          let fired = false;
+          const once = () => { fired = true; };
+          try { navigator.serial.addEventListener('connect', once, { once: true }); } catch { }
+
+          await new Promise(r => setTimeout(r, 500));
+
+          try { navigator.serial.removeEventListener('connect', once); } catch { }
+
+          try {
+            const ports = await navigator.serial.getPorts();
+            for (const p of ports) {
+              if (!samePortInfo(p)) continue;
+              try {
+                await window.CalliopeSerial?.openSerial?.({ port: p, mode });
+                if (!didUI) {
+                  didUI = true;
+                  window.__updateConnectUI?.();
+                }
+                log('✅ Serielle Verbindung wiederhergestellt.');
+                return true;
+              } catch { }
+            }
+          } catch { }
+
+          if (fired) { /* sofort nächste Schleife */ }
+        }
+        log('❌ Serielle konnte nicht automatisch wiederhergestellt werden.');
+        return false;
+      };
+
+
+      async function flashCalliope3() {
+        // NEU: für Calliope 3 immer den gebündelten Python-Code (mit Inline-Modulen) verwenden
+        let pyText = "";
+        if (typeof window.getBundledPy === "function") {
+          try {
+            pyText = await window.getBundledPy();
+          } catch (e) {
+            console.warn("[flashCalliope3] getBundledPy() failed, fallback auf Rohtext:", e);
+          }
+        }
+        if (!pyText) {
+          pyText = getPyText();
+        }
+        if (!pyText) {
+          log('❌ Kein Python-Code (Editor ist leer).', 'text-danger');
+          return;
+        }
+        // NEU: Verbindungspflicht – ohne offene serielle Verbindung kein Flash
+        if (!window.CalliopeSerial?.isOpen?.()) {
+          alert("Bitte zuerst auf „Verbinden“ klicken und die serielle Verbindung herstellen.");
+          return;
+        }
+
+
+        const wasOpen = !!(window.CalliopeSerial?.isOpen?.());
+        if (wasOpen) { try { await window.CalliopeSerial.closeSerial(); } catch { } }
+        // NEU: Während des Flashens Boot-/Reset-Ausgaben unterdrücken und Auto-Reconnect erlauben
+        try { window.CalliopeSerial?.expectReset?.(8000); } catch { }
+        const usb = createWebUSBConnection();
+        await usb.connect();
+
+        const tag = await getSerialTag(usb);
+        const fullHex = await buildFullHex(pyText);
+        const firstDone = !!localStorage.getItem(flagKeyFor(tag));
+
+        // Reconnect-Fenster setzen (optional – schadet nicht)
+        try { window.CalliopeSerial?.expectReset?.(8000); } catch { }
+
+        if (!firstDone) {
+          log("⚡ Voll-Flash (microbit-connection) …");
+          const stepLogFull = makeStepProgressLogger('full', log);
+          await usb.flash(async () => fullHex, { progress: (p) => stepLogFull(p) });
+          localStorage.setItem(flagKeyFor(tag), "1");
+          log("✅ Voll-Flash fertig.", "text-success");
+        } else {
+          log("⚡ Schnell-Flash (partial, microbit-connection) …");
+          const stepLogFast = makeStepProgressLogger('fast', log);
+          await usb.flash(async () => fullHex, { partial: true, progress: (p) => stepLogFast(p) });
+          log("✅ Schnell-Flash fertig.", "text-success");
+        }
+
+        // WebUSB sauber trennen
+        try { await usb.disconnect?.(); } catch { }
+
+        // 🔁 HIER wieder SERIELL öffnen – ohne Picker, mit Port-Reuse
+        // 🔁 Serielle nur leise wiederherstellen, wenn bereits freigegeben (kein Picker, kein Warn-Log)
+        try {
+          await new Promise(r => setTimeout(r, 900));
+          // Bereits autorisierte Ports auto-öffnen:
+          await window.CalliopeSerial?.tryOpenGranted?.();
+          // (keine UI-Meldung nötig – „stiller“ Reconnect)
+        } catch { }
+      }
+
+      (function wireEmergencySerialReset() {
+        const btn = document.getElementById('emergency-reset-btn');
+        const out = document.getElementById('output');
+
+        const log = (m, cls = 'text-warning') => {
+          out?.insertAdjacentHTML('beforeend', `<div class="${cls}">${m}</div>`);
+          out?.scrollTo?.(0, out.scrollHeight);
+        };
+
+        btn?.addEventListener('click', async () => {
+          if (!window.CalliopeSerial) { log('❌ CalliopeSerial nicht geladen.', 'text-danger'); return; }
+
+          try {
+            // Falls noch nicht verbunden: Picker zeigen und im REPL-Modus verbinden
+            if (!CalliopeSerial.isOpen?.()) {
+              await CalliopeSerial.openSerial({ mode: 'repl', forcePicker: true });
+            }
+
+            // Während des Resets Konsolenrauschen unterdrücken
+            try { CalliopeSerial.expectReset?.(4000); } catch { }
+
+            // Ctrl-C → laufendes Programm stoppen
+            await CalliopeSerial.write('\x03');
+            await new Promise(r => setTimeout(r, 120));
+
+            // Ctrl-D → Soft-Reset (führt boot.py/main.py erneut aus)
+            await CalliopeSerial.write('\x04');
+
+            log('↩︎ Soft-Reset gesendet (Ctrl-C, Ctrl-D).');
+          } catch (err) {
+            log(`❌ Reset fehlgeschlagen: ${err?.message || err}`, 'text-danger');
+          }
+        });
+      })();
+
+      // --- Button ---
+      // --- Button ---
+      flashBtn.addEventListener('click', async (e) => {
+        const out = document.getElementById('output');
+
+        const uiLog = (msg, cls = 'text-muted') => {
+          out?.insertAdjacentHTML('beforeend', `<div class="${cls}">${msg}</div>`);
+          out?.scrollTo?.(0, out.scrollHeight);
+        };
+
+        try {
+          out?.replaceChildren();
+
+          const tgt = resolveTarget();
+
+          if (tgt === 'c3') {
+            // if (e.altKey) window.forceUsbPicker?.();
+            await flashCalliope3();
+            return;
+          }
+
+          // -------- C12: Calliope 1/2 --------
+
+          // 🆕 Modul-Importe auf Calliope 1/2 blockieren
+          try {
+            let code = "";
+
+            if (typeof window.getBundledPy === "function") {
+              try {
+                code = await window.getBundledPy();
+              } catch {
+                code = "";
+              }
+            }
+            if (!code) code = getPyText();
+
+            if (code && window.collectImportedPyModules) {
+              const mods = window.collectImportedPyModules(code);
+              if (mods && Object.keys(mods).length) {
+                alert(
+                  "Modul-Importe (z.B. 'import servo') werden auf Calliope mini 1/2 " +
+                  "momentan nicht unterstützt.\n\n" +
+                  "Bitte den Modul-Code direkt in das Programm kopieren " +
+                  "oder Calliope mini 3 auswählen."
+                );
+                return; // 🚫 Flash für C12 abbrechen
+              }
+            }
+          } catch (err) {
+            console.warn("[C12] Modul-Check fehlgeschlagen:", err);
+            // Zur Sicherheit trotzdem weiterflashen
+          }
+
+          // C12: Mass-Storage → Board enumeriert neu, Serial-Handle wechselt.
+          try { window.CalliopeSerial?.expectReset?.(12000); } catch { }
+
+          uiLog('⚡ Übertrage HEX an Calliope 1/2 …');
+
+          // ✅ HEX bauen + Download
+          await CalliopeHex.buildAndDownload();
+
+          // stiller Hinweis (optional, aber hilfreich)
+          uiLog('📁 main.hex heruntergeladen – warte auf Calliope-Neustart …', 'text-muted');
+
+          // 🔒 sehr defensiver, einmaliger Auto-Reconnect (ohne User-Dialog)
+          setTimeout(() => {
+            window.reopenSerialWhenReady?.({
+              timeout: 20000,
+              preferSame: false,
+              mode: 'monitor',
+              onLog: (m) => uiLog(m)
+            });
+          }, 7000);
+
+        } catch (err) {
+          console.error(err);
+          uiLog(`❌ Flash-Fehler: ${err?.message || err}`, 'text-danger');
+        }
+      });
+    })();
+  </script>
+
+  <!-- Device Selector (zeigt/versteckt Buttons, setzt Ziel) -->
+  <script>
+    (function deviceSelector() {
+      const sel = document.getElementById('device-select');
+      const runIcon = document.getElementById('run-icon');
+      const resetBtn = document.getElementById('emergency-reset-btn');
+      const connectB = document.getElementById('connect-toggle-btn');
+      const flashB = document.getElementById('flash-btn');
+      const badge = document.getElementById('calliope-target');
+
+      if (!sel || !runIcon || !resetBtn || !connectB || !flashB) return;
+
+      const LS_KEY_DEVICE = 'ui.device';
+      const saveDevice = (v) => { try { localStorage.setItem(LS_KEY_DEVICE, v); } catch { } };
+      const loadDevice = () => { try { return localStorage.getItem(LS_KEY_DEVICE) || null; } catch { return null; } };
+
+      const show = el => el.classList.remove('hidden');
+      const hide = el => el.classList.add('hidden');
+      const lockRunUI = (lock) => {
+        // ✅ Run-Button bei Hardware komplett verstecken
+        if (lock) {
+          runIcon.classList.add('hidden');
+          runIcon.setAttribute('aria-hidden', 'true');
+        } else {
+          runIcon.classList.remove('hidden');
+          runIcon.removeAttribute('aria-hidden');
+        }
+
+        // (Optional) alte Disabled-Logik beibehalten, falls CSS/JS darauf reagiert
+        runIcon.classList.toggle('disabled', lock);
+        if (lock) {
+          runIcon.setAttribute('aria-disabled', 'true');
+          runIcon.title = 'Run im Browser deaktiviert (Hardware aktiv)';
+        } else {
+          runIcon.removeAttribute('aria-disabled');
+          runIcon.title = 'Programm ausführen (Shift+Enter)';
+        }
+
+        // Reset-Button bleibt immer nutzbar, nur Tooltip anpassen
+        resetBtn.removeAttribute('disabled');
+        resetBtn.title = lock ? 'Board-Reset (System neu starten)' : 'Notfall-Reset';
+      };
+
+
+
+      function applyUIByDevice(dev) {
+        const isC12 = dev === 'c12';
+        const isC3 = dev === 'c3';
+
+        // Sichtbarkeit der HW-Buttons
+        if (isC12) {
+          show(connectB);
+          show(flashB);
+        } else if (isC3) {
+          show(connectB);
+          show(flashB);
+        } else {
+          hide(connectB);
+          hide(flashB);
+        }
+
+        // Run im Browser sperren, wenn Hardware gewählt ist
+        lockRunUI(isC12 || isC3);
+
+        // kleines Badge „1/2“ bzw. „3“
+        if (badge) badge.textContent = isC12 ? '1/2' : (isC3 ? '3' : '–');
+        // Flash-Icon anpassen
+        if (isC3) {
+          flashB.innerHTML = '<i class="bi bi-lightning-charge-fill"></i>';
+          flashB.classList.remove('btn-warning');
+          flashB.classList.add('btn-flash-white');
+          flashB.title = 'Flash (Calliope mini 3)';
+        } else if (isC12) {
+          flashB.innerHTML = '<i class="bi bi-upload"></i>';
+          flashB.classList.remove('btn-warning');
+          flashB.classList.add('btn-flash-white');
+          flashB.title = 'Übertragen (Calliope mini 1/2)';
+        } else {
+          flashB.innerHTML = '<i class="bi bi-lightning-charge-fill"></i>';
+          flashB.classList.add('btn-warning');
+          flashB.title = 'Flash';
+        }
+      }
+
+      // aktuellen Wert vor dem Wechsel merken (einmalig oben im IIFE anlegen)
+      let __lastDev = sel.value;
+
+      sel.addEventListener('change', () => {
+        const dev = sel.value; // 'none' | 'c12' | 'c3' | 'microbit'
+
+        // 🔁 Automatischer Gerätewechsel-Handling für WebUSB:
+        try { window.NetbuchHW?.onDeviceChange?.(__lastDev, dev); } catch { }
+
+        saveDevice(dev);
+        applyUIByDevice(dev);
+        __lastDev = dev;
+      });
+      (function restoreDeviceOnLoad() {
+        const saved = (function () { try { return localStorage.getItem('ui.device'); } catch { return null; } })();
+        const current = sel.value; // Fallback: aktueller Wert im DOM
+
+        const desired = (saved && [...sel.options].some(o => o.value === saved))
+          ? saved
+          : current;
+
+        // Select optisch setzen
+        sel.value = desired;
+
+        // Events feuern, damit alle Hooks (UI, NetbuchHW, CalliopeHex…) anspringen
+        sel.dispatchEvent(new Event('input', { bubbles: true }));
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+
+        // Falls kein onChange gelaufen wäre, sicherheitshalber direkt anwenden
+        // (applyUIByDevice setzt Buttons & sperrt Run)
+        try { localStorage.setItem('ui.device', desired); } catch { }
+        applyUIByDevice(desired);
+      })();
+    })();
+  </script>
+  <!-- Deine App-Logik -->
+
+  <script src="scripts.js" defer></script>
+
+  <!-- Footer Links -->
+  <div style="text-align: center; font-size: small; margin: 10px 0; color: #666;">
+    <a href="#" data-bs-toggle="modal" data-bs-target="#datenschutzModal">Datenschutz</a> |
+    <a href="#" data-bs-toggle="modal" data-bs-target="#impressumModal">Impressum</a>
+  </div>
+
+</body>
+
+</html>

@@ -1,0 +1,18 @@
+# Button-Test mit LED-Matrix
+import calliopemini as CM
+
+loop = True
+while loop:
+    if CM.button_a.is_pressed():
+        CM.display.set_pixel(0, 0, 9) # Oben links
+    else:
+        CM.display.set_pixel(0, 0, 0)
+    if CM.button_b.is_pressed():
+        CM.display.set_pixel(4, 0, 9) # Oben rechts
+    else:
+        CM.display.set_pixel(4, 0, 0)
+    if CM.button_a.is_pressed() and CM.button_b.is_pressed():
+        CM.display.set_pixel(0, 0, 0)
+        CM.display.set_pixel(4, 0, 0)
+        loop = False
+    CM.sleep(100)

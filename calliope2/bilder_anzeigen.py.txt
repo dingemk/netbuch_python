@@ -1,0 +1,7 @@
+# Verschiedene Bilder anzeigen
+import calliope_mini as CM
+bilder = [CM.Image.HEART, CM.Image.HAPPY, CM.Image.SAD, CM.Image.DIAMOND, CM.Image.SQUARE]
+for bild in bilder:
+    CM.display.show(bild)
+    CM.sleep(1000)
+CM.display.show("LED-Matrix-Test fertig!")

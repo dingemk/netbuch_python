@@ -1,0 +1,16 @@
+#RGB-Test
+from calliope_mini import *
+
+led.set_colors(255, 0, 0)
+sleep(2000)    
+led.set_colors(0, 255, 0)
+sleep(2000)    
+led.set_colors(0, 0, 255)
+sleep(2000) 
+led.set_colors(128, 255, 0)
+sleep(2000)
+led.set_colors(255, 0, 128)
+sleep(2000) 
+led.set_colors(0, 128, 255)
+sleep(2000) 
+led.set_colors(0, 0, 0)

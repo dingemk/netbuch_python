@@ -1,0 +1,19 @@
+#Lage anzeigen mit einer Dosenlibelle
+import calliope_mini as CM
+
+empfindlichkeit = 200
+while not CM.button_b.was_pressed():
+    a0, a1, a2 = CM.accelerometer.get_values()
+    rechts_links = min(abs(a0)//empfindlichkeit, 2)
+    if a0 != 0:
+        rechts_links = rechts_links * a0 // abs(a0)
+    
+    up_down = min(abs(a1)//empfindlichkeit, 2)
+    if a1 !=  0:
+        up_down = up_down * a1 // abs(a1)
+    
+    CM.display.clear()
+    CM.display.set_pixel(2-rechts_links, 2-up_down, 9)
+    CM.sleep(1000)
+
+CM.display.clear()

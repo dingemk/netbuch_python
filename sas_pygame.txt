@@ -1,0 +1,2536 @@
+# sas_pygame3.py
+# Überarbeitete Version: x,y,width,height bleiben unverändert.
+# Transformationen laufen ausschließlich über die 3x3-Matrix `at`.
+# - get_shape_* und get_center_* liefern nun lokale (untransformierte) Werte
+# - es gibt neue Helfer get_transformed_points() / get_transformed_bbox()
+# - Fallback-Collisionen (ohne Shapely) nutzen die transformierte Bounding-Box
+
+import time
+from math import sin, cos, radians, pi, atan2
+
+import pygame
+import random
+import copy
+from datetime import datetime
+
+view = None
+WIDTH = 600
+HEIGHT = 400
+
+# --- einfache 3x3-Matrix-Hilfsfunktionen (ohne NumPy) ---
+def _mat_identity():
+    return [
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ]
+
+
+def _mat_mul(a, b):
+    """Multipliziert zwei 3x3-Matrizen a @ b."""
+    res = [[0.0, 0.0, 0.0] for _ in range(3)]
+    for i in range(3):
+        for j in range(3):
+            res[i][j] = (
+                a[i][0] * b[0][j]
+                + a[i][1] * b[1][j]
+                + a[i][2] * b[2][j]
+            )
+    return res
+
+
+def _mat_vec(m, x, y):
+    """Multipliziert 3x3-Matrix m mit einem Vektor (x, y, 1)."""
+    nx = m[0][0] * x + m[0][1] * y + m[0][2]
+    ny = m[1][0] * x + m[1][1] * y + m[1][2]
+    return (nx, ny)
+
+
+def _mat_translate(dx, dy):
+    return [
+        [1.0, 0.0, dx],
+        [0.0, 1.0, dy],
+        [0.0, 0.0, 1.0],
+    ]
+
+
+def _mat_rotate(rad):
+    return [
+        [cos(rad), sin(rad), 0.0],
+        [-sin(rad), cos(rad), 0.0],
+        [0.0, 0.0, 1.0],
+    ]
+
+
+def _mat_scale(sx, sy):
+    return [
+        [sx, 0.0, 0.0],
+        [0.0, sy, 0.0],
+        [0.0, 0.0, 1.0],
+    ]
+
+
+
+try:
+    from shapely.geometry import Polygon as ShapelyPolygon
+    from shapely.ops import unary_union
+    try:
+        # Shapely 2.x
+        from shapely import make_valid as _sh_make_valid  # type: ignore
+    except Exception:
+        _sh_make_valid = None
+    try:
+        from shapely.errors import ShapelyError  # type: ignore
+    except Exception:
+        ShapelyError = Exception  # type: ignore
+
+    HAS_SHAPELY = True
+except Exception:
+    HAS_SHAPELY = False
+    _sh_make_valid = None
+    ShapelyError = Exception  # type: ignore
+
+
+def _shapely_clean(g):
+    """Best-effort repair for invalid geometries (prevents crashes in union/intersects).
+
+    - make_valid when available (Shapely 2.x)
+    - buffer(0) trick as fallback
+
+    Returns a (possibly fixed) geometry or None.
+    """
+    if g is None:
+        return None
+    try:
+        if getattr(g, "is_empty", False):
+            return None
+    except Exception:
+        pass
+
+    # Try make_valid (Shapely 2)
+    if _sh_make_valid is not None:
+        try:
+            g = _sh_make_valid(g)
+        except Exception:
+            pass
+
+    # buffer(0) can fix many self-intersections
+    try:
+        if hasattr(g, "is_valid") and not g.is_valid:
+            g = g.buffer(0)
+    except Exception:
+        pass
+
+    try:
+        if getattr(g, "is_empty", False):
+            return None
+    except Exception:
+        pass
+
+    return g
+
+
+
+# -----------------------
+# helpers
+# -----------------------
+def bounds(pointlist):
+    xs = [p[0] for p in pointlist]
+    ys = [p[1] for p in pointlist]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def color_to_rgb(name_or_tuple):
+    if isinstance(name_or_tuple, (tuple, list)) and len(name_or_tuple) in (3, 4):
+        return tuple(name_or_tuple)[:3]
+    table = {
+        "black": (0, 0, 0),
+        "white": (255, 255, 255),
+        "red": (255, 0, 0),
+        "green": (0, 200, 0),
+        "blue": (0, 0, 255),
+        "yellow": (255, 220, 0),
+        "gray": (120, 120, 120),
+        "orange": (255, 140, 0),
+        "purple": (160, 32, 240),
+        "pink": (255, 105, 180),
+        "magenta": (255, 0, 255),
+    }
+    return table.get(str(name_or_tuple).lower(), (0, 0, 0))
+
+
+# -----------------------
+# View / Scene
+# -----------------------
+class View:
+    def __init__(self, width=WIDTH, height=HEIGHT, colour="white", title="SAS-Programm"):
+        global view
+        # ensure pygame is initialized
+        # IMPORTANT (pyodide): do NOT call pygame.quit() here; it can leave SDL in a broken state.
+        try:
+            if not pygame.get_init():
+                pygame.init()
+        except Exception:
+            # even if init fails, we continue and let set_mode raise a visible error
+            pass
+
+        # Ensure display is initialized; recover once if needed
+        try:
+            if hasattr(pygame, "display") and not pygame.display.get_init():
+                pygame.display.init()
+        except Exception:
+            pass
+        # set global view so Shapes auto-register into the Scene
+        view = self
+        pygame.display.set_caption(title)
+        self._title = str(title)
+        self.width, self.height = width, height
+        self.bg_color = color_to_rgb(colour)
+        try:
+            self.screen = pygame.display.set_mode((int(width), int(height)))
+        except Exception:
+            # One recovery attempt: re-init display and try again.
+            try:
+                pygame.display.quit()
+            except Exception:
+                pass
+            try:
+                pygame.display.init()
+            except Exception:
+                pass
+            self.screen = pygame.display.set_mode((int(width), int(height)))
+        self.clock = pygame.time.Clock()
+        self.scene = Scene(self.screen, width, height, self.bg_color)
+        self.keyBuffer = []
+        self.running = True
+
+        # In manchen IDE/pyodide-Umgebungen erscheint der Canvas erst,
+        # nachdem mindestens einmal gefüllt, geflippt und Events gepumpt wurden.
+        try:
+            self.screen.fill(self.bg_color)
+            pygame.display.flip()
+            pygame.event.pump()
+        except Exception:
+            pass
+
+        # Scene-Draw einmal anstoßen (falls das bereits funktioniert)
+        try:
+            self.scene.draw()
+        except Exception:
+            pass
+
+        # Debug: Fehler sichtbar machen, auch wenn die IDE keine Konsole zeigt
+        self._debug_show_errors = True
+        self.last_error = ""
+
+        # Maus-Status
+        self.mouseX = 0
+        self.mouseY = 0
+        self.mouse_click = False
+
+        # Maus-Status (View-weit, sas.jar-like)
+        self.mouseDown = False
+        self.mousePressEvent = False
+        self.mouseDrag = False
+        self._mouse_released_flag = False
+
+    def step(self, fps=60):
+        """Ein einzelner Frame: Events verarbeiten + zeichnen.
+
+        In manchen Schul-IDE/pyodide-Umgebungen sieht man keine Prints.
+        Darum werden Exceptions im Fenster angezeigt.
+
+        Rückgabe: dt in Sekunden.
+        """
+        # fps robust machen (None/0 bedeutet: kein FPS-Limit)
+        try:
+            fps_val = None if fps is None else int(fps)
+        except Exception:
+            fps_val = 60
+
+        try:
+            self.process_events()
+            self.scene.draw()
+
+            # Timing / dt
+            if fps_val is None or fps_val <= 0:
+                dt_ms = self.clock.tick()  # kein Limit
+            else:
+                dt_ms = self.clock.tick(fps_val)
+
+            # wenn vorher ein Fehler war, aber jetzt nicht mehr: Titel zurücksetzen
+            if self.last_error:
+                try:
+                    pygame.display.set_caption(getattr(self, "_title", "SAS-Programm"))
+                except Exception:
+                    pass
+                self.last_error = ""
+
+            return dt_ms / 1000.0
+
+        except Exception as e:
+            # Fehler merken
+            self.last_error = repr(e)
+
+            # Fenster-Titel setzen (sichtbar ohne Konsole)
+            try:
+                pygame.display.set_caption("SAS ERROR: " + self.last_error)
+            except Exception:
+                pass
+
+            # Overlay im Fenster anzeigen
+            if getattr(self, "_debug_show_errors", True):
+                try:
+                    self._draw_error_overlay(self.last_error)
+                except Exception:
+                    pass
+
+            # Damit man den Fehler sicher sieht (auch wenn die IDE sofort beendet):
+            try:
+                pygame.event.pump()
+                pygame.time.wait(2000)
+            except Exception:
+                pass
+
+            # Programm sauber stoppen – aber NICHT re-raise (IDE versteckt sonst alles)
+            self.running = False
+            return 0.0
+    
+    def quit(self):
+        self.running = False
+        try:
+            pygame.quit()
+        except Exception:
+            pass
+        
+    def _draw_error_overlay(self, msg: str):
+        """Zeigt eine rote Fehlermeldung im Fenster an (falls Konsole unsichtbar)."""
+        # Hintergrund leicht abdunkeln
+        try:
+            overlay = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+            overlay.fill((255, 255, 255, 220))
+            self.screen.blit(overlay, (0, 0))
+        except Exception:
+            pass
+
+        try:
+            font = pygame.font.SysFont(None, 24, bold=True)
+        except Exception:
+            font = pygame.font.Font(None, 24)
+
+        lines = [
+            "FEHLER (SAS):",
+            msg,
+            "Tipp: Import/Dateipfad prüfen (sas.__file__) oder Stacktrace aktivieren.",
+        ]
+
+        y = 20
+        for line in lines:
+            surf = font.render(str(line), True, (200, 0, 0))
+            self.screen.blit(surf, (20, y))
+            y += surf.get_height() + 8
+
+        pygame.display.flip()
+
+    def setDebugShowErrors(self, enabled=True):
+        """Java-Style: Fehler-Overlay an/aus."""
+        self._debug_show_errors = bool(enabled)
+
+    def wait(self, millsec):
+        time.sleep(int(millsec) / 1000.0)
+
+    # --- zentrale Event-Verarbeitung
+    def process_events(self):
+        events = pygame.event.get()
+
+        for event in events:
+            if event.type == pygame.QUIT:
+                self.running = False
+
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.running = False
+                else:
+                    name = pygame.key.name(event.key).title()
+                    self.keyBuffer.append(name)
+
+            elif event.type == pygame.KEYUP:
+                pass
+
+            # -----------------
+            # Maus-Events (SAS)
+            # -----------------
+            elif event.type == pygame.MOUSEMOTION:
+                self.mouseX, self.mouseY = event.pos
+                # View-weit: Drag-Status setzen
+                if self.mouseDown:
+                    self.mouseDrag = True
+                # Bewegung an alle Shapes weiterreichen (für Drag)
+                for g in self.scene.graphics:
+                    if hasattr(g, "set_mouse_motion"):
+                        g.set_mouse_motion(event.pos)
+
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                self.mouse_click = True
+                self.mouseX, self.mouseY = event.pos
+                # View-weit: Press/Down-Status setzen
+                self.mouseDown = True
+                self.mousePressEvent = True
+                self.mouseDrag = False
+                # Press nur an das oberste getroffene Objekt
+                for g in reversed(self.scene.graphics):
+                    if hasattr(g, "hit_test") and g.hit_test(event.pos):
+                        if hasattr(g, "set_mouse_press"):
+                            g.set_mouse_press(event.pos)
+                        break
+
+            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                self.mouseX, self.mouseY = event.pos
+                # View-weit: Release/Up-Status setzen
+                self._mouse_released_flag = True
+                self.mouseDown = False
+                self.mouseDrag = False
+                # Release an alle Shapes (damit Zustände sauber enden)
+                for g in self.scene.graphics:
+                    if hasattr(g, "set_mouse_release"):
+                        g.set_mouse_release(event.pos)
+
+        # Shapes können Java-Stil Tasten abfragen
+        for g in self.scene.graphics:
+            poll = getattr(g, "_poll_keys_from_view", None)
+            if poll is not None:
+                poll()
+
+        return events
+
+    # --- Mausabfragen (sas.jar-like)
+    def getMouseX(self):
+        return int(self.mouseX)
+
+    def getMouseY(self):
+        return int(self.mouseY)
+
+    def mousePressed(self):
+        """TRUE nur einmal pro Press."""
+        was = bool(self.mousePressEvent)
+        self.mousePressEvent = False
+        return was
+
+    def mouseReleased(self):
+        was = bool(self._mouse_released_flag)
+        self._mouse_released_flag = False
+        return was
+
+    def mouseDragged(self):
+        return bool(self.mouseDrag) and bool(self.mouseDown)
+
+    def mouseClicked(self):
+        """Einfacher Click-Flag (wird bei MOUSEBUTTONDOWN gesetzt)."""
+        was = bool(self.mouse_click)
+        self.mouse_click = False
+        return was
+
+    def get_mouse_x(self):
+        return self.getMouseX()
+
+    def get_mouse_y(self):
+        return self.getMouseY()
+
+    def mouse_dragged(self):
+        return self.mouseDragged()
+
+    def mouse_clicked(self):
+        return self.mouseClicked()
+
+    # --- held-down key state (continuous)
+    def _key_down_now(self, key_const) -> bool:
+        """True solange die Taste gehalten wird (pygame Key-State)."""
+        try:
+            pressed = pygame.key.get_pressed()
+            return bool(pressed[key_const])
+        except Exception:
+            return False
+
+    def key_left_down(self):
+        return self._key_down_now(pygame.K_LEFT)
+
+    def key_right_down(self):
+        return self._key_down_now(pygame.K_RIGHT)
+
+    def key_up_down(self):
+        return self._key_down_now(pygame.K_UP)
+
+    def key_down_down(self):
+        return self._key_down_now(pygame.K_DOWN)
+
+    # CamelCase aliases (wie oft erwartet)
+    def keyLeftDown(self):
+        return self.key_left_down()
+
+    def keyRightDown(self):
+        return self.key_right_down()
+
+    def keyUpDown(self):
+        return self.key_up_down()
+
+    def keyDownDown(self):
+        return self.key_down_down()
+
+    # --- key buffer helpers (SaS-like)
+    def key_buffer_delete(self):
+        self.keyBuffer = []
+
+    def key_pressed(self, *params):
+        if len(params) == 0:
+            return len(self.keyBuffer) > 0
+        key = params[0]
+        if key in self.keyBuffer:
+            self.keyBuffer.remove(key)
+            return True
+        return False
+
+    def key_enter_pressed(self):
+        return self.key_pressed("Return")
+
+    def key_left_pressed(self):
+        # continuous while held
+        if self.key_left_down():
+            return True
+        # fallback: once per keydown
+        return self.key_pressed("Left")
+
+    def key_right_pressed(self):
+        if self.key_right_down():
+            return True
+        return self.key_pressed("Right")
+
+    def key_up_pressed(self):
+        if self.key_up_down():
+            return True
+        return self.key_pressed("Up")
+
+    def key_down_pressed(self):
+        if self.key_down_down():
+            return True
+        return self.key_pressed("Down")
+
+    # --- SaS.jar-Kompatibilitäts-Aliasse (CamelCase) ---
+    def keyLeftPressed(self):
+        return self.key_left_pressed()
+
+    def keyRightPressed(self):
+        return self.key_right_pressed()
+
+    def keyUpPressed(self):
+        return self.key_up_pressed()
+
+    def keyDownPressed(self):
+        return self.key_down_pressed()
+
+    def keyEnterPressed(self):
+        return self.key_enter_pressed()
+
+    def keyBackspacePressed(self):
+        return self.key_backspace_pressed()
+
+    def setBackgroundColour(self, color):
+        # UK spelling alias
+        return self.setBackgroundColor(color)
+
+    def setTitle(self, title):
+        # Common convenience alias
+        return self.setName(title)
+
+    def key_backspace_pressed(self):
+        return self.key_pressed("Backspace")
+
+    def key_get_char(self):
+        """
+        Nicht-blockierende Variante:
+        Gibt ein Zeichen aus dem Buffer zurück oder '' wenn keins da ist.
+        (So vermeiden wir die problematische while/wait-Schleife.)
+        """
+        if not self.keyBuffer:
+            return ""
+        c = self.keyBuffer[0]
+        self.keyBuffer.pop(0)
+        return c
+
+    def key_get_char_nowait(self):
+        """Alias auf key_get_char (nicht blockierend)."""
+        return self.key_get_char()
+    
+    # --- Java-kompatible API (sas.jar)
+    @staticmethod
+    def getView():
+        global view
+        return view
+
+    def setBackgroundColor(self, color):
+        self.bg_color = color_to_rgb(color)
+        self.scene.bg = self.bg_color
+
+    def setSize(self, w, h):
+        self.width, self.height = int(w), int(h)
+        self.screen = pygame.display.set_mode((self.width, self.height))
+        self.scene.screen = self.screen
+        self.scene.width, self.scene.height = self.width, self.height
+    def setName(self, title):
+        pygame.display.set_caption(str(title))
+        self._title = str(title)
+
+    def remove(self, shape):
+        self.scene.remove(shape)
+
+    def keyBufferDelete(self):
+        self.key_buffer_delete()
+
+    def keyPressed(self, *params):
+        if len(params) == 0:
+            return self.key_pressed()
+
+        k = params[0]
+
+        # Spezialfall: Leertaste wie in SaS.jar (keyPressed(' '))
+        if k == ' ':
+            return self.key_pressed("Space")
+
+        # Einzelne Buchstaben wie in SaS.jar: keyPressed('a') / keyPressed('A')
+        if isinstance(k, str) and len(k) == 1:
+            return self.key_pressed(k) or self.key_pressed(k.upper()) or self.key_pressed(k.lower())
+
+        # Allgemeiner Fall: Namen wie "Left", "Right", "Space", ...
+        ks = str(k)
+        return self.key_pressed(ks) or self.key_pressed(ks.title())
+
+    # --- Level-based key query (True solange Taste gehalten wird)
+    def key_down(self, key):
+        """Level-based query: True solange Taste gehalten wird.
+
+        Unterstützt:
+        - Sondertasten: 'Left', 'Right', 'Up', 'Down', 'Space', 'Return', 'Backspace'
+        - Buchstaben/Ziffern: 'a', 'A', '0', ...
+        """
+        try:
+            pressed = pygame.key.get_pressed()
+        except Exception:
+            return False
+
+        name = str(key)
+        k = name.strip()
+        kl = k.lower()
+
+        special = {
+            "left": pygame.K_LEFT,
+            "right": pygame.K_RIGHT,
+            "up": pygame.K_UP,
+            "down": pygame.K_DOWN,
+            "space": pygame.K_SPACE,
+            "return": pygame.K_RETURN,
+            "enter": pygame.K_RETURN,
+            "backspace": pygame.K_BACKSPACE,
+            "escape": pygame.K_ESCAPE,
+        }
+
+        keycode = special.get(kl)
+        if keycode is None:
+            # single character like 'a' or '0'
+            if len(k) == 1:
+                try:
+                    keycode = pygame.key.key_code(kl)
+                except Exception:
+                    keycode = None
+            else:
+                # try pygame name -> code (best effort)
+                try:
+                    keycode = pygame.key.key_code(kl)
+                except Exception:
+                    keycode = None
+
+        if keycode is None:
+            return False
+
+        try:
+            return bool(pressed[keycode])
+        except Exception:
+            return False
+
+    # CamelCase alias (wie in vielen Frameworks üblich)
+    def keyDown(self, key):
+        return self.key_down(key)
+
+    def keyGetChar(self):
+        # nicht-blockierend, IDE-kompatibel
+        if hasattr(self, "key_get_char_nowait"):
+            return self.key_get_char_nowait()
+        return self.key_get_char()
+
+
+class Scene:
+    def __init__(self, screen, width, height, bg):
+        self.screen = screen
+        self.width, self.height = width, height
+        self.bg = color_to_rgb(bg)
+        self.graphics = []
+
+    def insert(self, grafik):
+        self.graphics.append(grafik)
+        # SaS-like: show newly created objects immediately
+        try:
+            self.draw()
+        except Exception:
+            pass
+
+    def remove(self, grafik):
+        if grafik in self.graphics:
+            self.graphics.remove(grafik)
+
+    def draw(self):
+        self.screen.fill(self.bg)
+        for g in list(self.graphics):
+            g.draw(self.screen)
+        pygame.display.flip()
+
+
+# -----------------------
+# Shapes base
+# -----------------------
+class Shapes:
+    def __init__(self, x=0, y=0, width=100, height=100, color="black"):
+        global view
+        # lokale/geometrische Basisdaten (bleiben unverändert durch Transforms)
+        self.x, self.y = x, y
+        self.width, self.height = width, height
+        self.color = color_to_rgb(color)
+
+        # optional texture support
+        self.texture_path = None
+        self._texture_orig = None  # original loaded surface (RGBA)
+        self._texture_cache = {}   # cache by (w,h,angle)
+
+        # Transformationsmatrix (3x3) – hier laufen alle Transformationen rein
+        # Wichtig: Die Startposition (x,y) wird als Translation in der Matrix abgebildet.
+        # Dadurch können alle Basispunkte konsequent lokal (0..w/0..h) bleiben.
+        self.at = _mat_translate(x, y)
+
+        # Basispunkte in lokalen Koordinaten (ungefähr Rechtecks-Eckpunkte oder eine Punktliste)
+        self.points = []
+        self.transformedpoints = []
+
+        # weitere Zustände
+        self.direction = 90
+        # explicit flip flags (needed for Picture rendering; matrix decomposition with reflections is ambiguous)
+        self._flipx = False  # left/right
+        self._flipy = False  # up/down
+        self.hidden = False
+        # Maus-Status (sas.jar-like)
+        # - mouseDown: Taste aktuell gedrückt
+        # - mousePressEvent: "Pressed"-Ereignis (einmalig)
+        # - mouseDrag: True sobald bei gedrückter Taste bewegt wurde
+        self.mouseDown = False
+        self.mousePressEvent = False
+        self.mouseDrag = False
+        self.mouse_click = False
+        self.mouseX = 0
+        self.mouseY = 0
+        self.transparency = 1.0
+        self._mouse_released_flag = False
+        # Sprite-Management (sas.jar-like): wenn True, wird das Objekt nicht separat in der Scene gezeichnet
+        self._managed_by_sprite = False
+        if view is not None:
+            self.scene = view.scene
+            self.scene.insert(self)
+        else:
+            self.scene = None
+
+    def draw(self, screen):
+        if self.hidden:
+            return
+
+    def set_color(self, color):
+        self.color = color_to_rgb(color)
+
+    # --- SaS.jar-Kompatibilitäts-Aliasse (CamelCase/UK spelling) ---
+    def setColor(self, color):
+        return self.set_color(color)
+
+    def setColour(self, color):
+        return self.set_color(color)
+
+    def get_color(self):
+        return self.color
+
+    def getColor(self):
+        return self.get_color()
+
+    def getMouseX(self):
+        return int(self.get_mouse_x())
+
+    def getMouseY(self):
+        return int(self.get_mouse_y())
+
+    def mouseClicked(self):
+        return self.mouse_clicked()
+
+    def loadTexture(self, path):
+        """Java-API: Setzt eine Textur (Bilddatei) für das Shape."""
+        self.setTexture(path)
+
+    def setTexture(self, path):
+        """Python-API Alias: Textur setzen."""
+        self.texture_path = None if path is None else str(path)
+        self._texture_orig = None
+        self._texture_cache = {}
+        if self.texture_path:
+            try:
+                img = pygame.image.load(self.texture_path).convert_alpha()
+                self._texture_orig = img
+            except Exception as e:
+                print("[sas_pygame3] texture load failed:", self.texture_path, repr(e))
+                self._texture_orig = None
+
+    def clearTexture(self):
+        self.texture_path = None
+        self._texture_orig = None
+        self._texture_cache = {}
+    def get_transformed_center(self):
+        """Mittelpunkt in Weltkoordinaten (nach Transformation)."""
+        lc_x = self.width / 2.0
+        lc_y = self.height / 2.0
+        return _mat_vec(self.at, lc_x, lc_y)
+
+    def set_hidden(self, is_hidden):
+        self.hidden = is_hidden
+
+    def is_hidden(self):
+        return self.hidden
+
+    # ------------------
+    # Lokale Geometrie (untransformiert)
+    # ------------------
+    def get_shape_x(self):
+        return round(self.x)
+
+    def get_shape_y(self):
+        return round(self.y)
+
+    def get_shape_width(self):
+        return round(self.width)
+
+    def get_shape_height(self):
+        return round(self.height)
+
+    def get_center_x(self):
+        return round(self.x + self.width / 2)
+
+    def get_center_y(self):
+        return round(self.y + self.height / 2)
+
+    # ------------------
+    # Transform-Utilities
+    # ------------------
+    def get_transformed_points(self):
+        """Gibt die lokalen Punkte transformiert in Weltkoordinaten zurück."""
+        pts = []
+        for xp, yp in self.points:
+            vx, vy = _mat_vec(self.at, xp, yp)
+            pts.append((round(vx), round(vy)))
+        self.transformedpoints = pts
+        return pts
+
+    def _corners_transformed(self):
+        """Eckpunkte der lokalen Bounding-Box transformiert ins Welt-Koordinatensystem."""
+        p1 = _mat_vec(self.at, 0, 0)
+        p2 = _mat_vec(self.at, self.width, 0)
+        p3 = _mat_vec(self.at, self.width, self.height)
+        p4 = _mat_vec(self.at, 0, self.height)
+        return [p1, p2, p3, p4]
+
+    def get_transformed_bbox(self):
+        """Gibt die Axis-Aligned Bounding Box der transformierten Form zurück: (minx,miny,maxx,maxy)"""
+        pts = self._corners_transformed()
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        return (round(min(xs)), round(min(ys)), round(max(xs)), round(max(ys)))
+
+    # ------------------
+    # Reset / Direction
+    # ------------------
+    def reset(self):
+        # Restore transform to the initial translation (x,y)
+        self.at = _mat_translate(self.x, self.y)
+        self._flipx = False
+        self._flipy = False
+
+    def clone(self):
+        """Erzeugt eine tiefe Kopie des Shapes und fügt sie in die aktuelle Scene ein."""
+        cloned = copy.deepcopy(self)
+        global view
+        if view is not None and hasattr(view, "scene"):
+            cloned.scene = view.scene
+            view.scene.insert(cloned)
+        else:
+            cloned.scene = None
+        return cloned
+
+    def set_direction(self, direction):
+        self.direction = direction
+
+    def get_direction(self):
+        return self.direction
+
+    # --- transforms (ändern NUR self.at)
+    def move(self, *params):
+        if len(params) == 2:
+            dx, dy = params
+        else:
+            distance = params[0]
+            dy = -distance * cos(self.direction * pi / 180)
+            dx = distance * sin(self.direction * pi / 180)
+        neu = _mat_translate(dx, dy)
+        self.at = _mat_mul(neu, self.at)
+
+    def move_to(self, x, y):
+        """Verschiebt so, dass die aktuelle (transformierte) linke obere Ecke auf (x,y) liegt."""
+        tx, ty, _, _ = self.get_transformed_bbox()
+        self.move(x - tx, y - ty)
+
+    def turn(self, *params):
+        """
+        - turn(angle)
+        - turn(x, y, angle)  (dreht um Weltkoordinate (x,y))
+
+        Wichtig: Diese Methode verändert **nicht** x/y/width/height, sondern nur die Matrix self.at.
+        """
+        if len(params) == 3:
+            x, y, angle = params
+            rad = radians(-angle)
+            rot = _mat_rotate(rad)
+            va = _mat_translate(-x, -y)
+            ve = _mat_translate(x, y)
+            self.at = _mat_mul(ve, _mat_mul(rot, _mat_mul(va, self.at)))
+            self._texture_cache = {}
+        elif len(params) == 1:
+            angle = params[0]
+            # rotation um den AKTUELLEN (transformierten) Mittelpunkt in Weltkoordinaten
+            # lokaler Mittelpunkt (in Objektkoordinaten)
+            lc_x = self.width / 2.0
+            lc_y = self.height / 2.0
+            # in Weltkoordinaten transformieren (aktueller Mittelpunkt nach bisherigen Transforms)
+            cx, cy = _mat_vec(self.at, lc_x, lc_y)
+
+            rad = radians(-angle)
+            rot = _mat_rotate(rad)
+            va = _mat_translate(-cx, -cy)
+            ve = _mat_translate(cx, cy)
+
+            self.set_direction(self.get_direction() + angle)
+            self.at = _mat_mul(ve, _mat_mul(rot, _mat_mul(va, self.at)))
+            self._texture_cache = {}
+
+    def turnTo(self, *args):
+        # turnTo(angle) ODER turnTo(x, y)
+        if len(args) == 1:
+            return self.turn_to(args[0])
+        if len(args) == 2:
+            x, y = args
+            cx, cy = self.get_transformed_center()
+            direction = Tools.getDirection(cx, cy, x, y)
+            rotation = direction - self.get_direction()
+            self.turn(rotation)
+            self.set_direction(direction)
+            return
+        raise TypeError("turnTo erwartet (angle) oder (x,y)")
+
+    def turn_to(self, angle):
+        target = float(angle) % 360.0
+        current = float(self.get_direction()) % 360.0
+        delta = target - current
+        # turn(delta) aktualisiert Matrix und direction
+        self.turn(delta)
+        # direction exakt auf target setzen
+        self.set_direction(target)
+
+    def scale(self, sx, sy):
+        # If scale uses negative factors, this is a reflection.
+        # Picture rendering needs explicit flip flags; matrix decomposition loses the sign.
+        try:
+            sx_f = float(sx)
+            sy_f = float(sy)
+        except Exception:
+            sx_f = sx
+            sy_f = sy
+
+        if sx_f < 0:
+            self._flipx = not getattr(self, "_flipx", False)
+        if sy_f < 0:
+            self._flipy = not getattr(self, "_flipy", False)
+
+        cx, cy = self.get_transformed_center()
+        S = _mat_scale(sx, sy)
+        va = _mat_translate(-cx, -cy)
+        ve = _mat_translate(cx, cy)
+        self.at = _mat_mul(ve, _mat_mul(S, _mat_mul(va, self.at)))
+        # texture cache becomes invalid when scale changes
+        self._texture_cache = {}
+        # Picture uses separate render/mask caches
+        if hasattr(self, "_render_cache"):
+            try:
+                self._render_cache = {}
+            except Exception:
+                pass
+        if hasattr(self, "_mask_cache"):
+            try:
+                self._mask_cache = {}
+            except Exception:
+                pass
+
+    def scale_to(self, width, height):
+        """Skaliert auf Ziel-Breite/Höhe bezogen auf die *aktuelle transformierte* Größe.
+
+        SaS.jar verwendet dafür die Bounding-Box nach Transformation (getShapeWidth/Height).
+        """
+        try:
+            cur_w = float(self.getShapeWidth())
+            cur_h = float(self.getShapeHeight())
+        except Exception:
+            cur_w = float(self.get_shape_width() or 1)
+            cur_h = float(self.get_shape_height() or 1)
+
+        cur_w = cur_w if cur_w != 0 else 1.0
+        cur_h = cur_h if cur_h != 0 else 1.0
+        self.scale(float(width) / cur_w, float(height) / cur_h)
+
+    def flip_horizontal(self):
+        # mirror left/right (negative x scale)
+        self.scale(-1, 1)
+
+    def flip_vertical(self):
+        # mirror up/down (negative y scale)
+        self.scale(1, -1)
+
+    # --- mouse
+    def hit_test(self, pos):
+        if self.hidden:
+            return False
+        pts = self.get_transformed_points() or [
+            (self.get_transformed_bbox()[0], self.get_transformed_bbox()[1]),
+            (self.get_transformed_bbox()[2], self.get_transformed_bbox()[1]),
+            (self.get_transformed_bbox()[2], self.get_transformed_bbox()[3]),
+            (self.get_transformed_bbox()[0], self.get_transformed_bbox()[3]),
+        ]
+        if len(pts) < 3:
+            return False
+        return _point_in_poly(pos, pts)
+
+    def mouse_clicked(self):
+        mc = self.mouse_click and not self.hidden
+        self.mouse_click = False
+        return mc
+    
+    # --- Java-API Mausmethoden
+    def mousePressed(self):
+        # sas.jar-like: TRUE nur einmal pro Press
+        if self.hidden:
+            return False
+        was = bool(self.mousePressEvent)
+        self.mousePressEvent = False
+        return was
+
+    def mouseReleased(self):
+        was = bool(self._mouse_released_flag) and not self.hidden
+        self._mouse_released_flag = False
+        return was
+
+    def mouseDragged(self):
+        if self.hidden:
+            return False
+        return bool(self.mouseDrag) and bool(self.mouseDown)
+
+
+    def set_mouse_press(self, pos):
+        self.mouseX, self.mouseY = pos
+        self.mouse_click = True
+        self.mouseDown = True
+        self.mousePressEvent = True
+        self.mouseDrag = False
+        self._mouse_released_flag = False
+
+    def set_mouse_release(self, pos):
+        self._mouse_released_flag = True
+        self.mouseDown = False
+        self.mouseDrag = False
+        self.mousePressEvent = False
+    
+    def set_mouse_motion(self, pos):
+        if self.mouseDown:
+            self.mouseDrag = True
+        self.mouseX, self.mouseY = pos
+
+    def get_mouse_x(self):
+        return self.mouseX
+
+    def get_mouse_y(self):
+        return self.mouseY
+
+    # --- collision
+    def _as_shapely(self):
+        if not HAS_SHAPELY:
+            return None
+        pts = self.get_transformed_points()
+        if not pts or len(pts) < 3:
+            return None
+        try:
+            g = ShapelyPolygon(pts)
+        except Exception:
+            return None
+        return _shapely_clean(g)
+
+    def intersects(self, other):
+        # supports other = Shapes or Sprite
+        other_hidden = bool(getattr(other, "hidden", False))
+        if self.hidden or other_hidden:
+            return False
+
+        # --- ohne shapely: bbox-fallback ---
+        if not HAS_SHAPELY:
+            x1, y1, X1, Y1 = self.get_transformed_bbox()
+            r1 = pygame.Rect(x1, y1, X1 - x1, Y1 - y1)
+
+            if isinstance(other, Sprite):
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+            else:
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+
+            r2 = pygame.Rect(x2, y2, X2 - x2, Y2 - y2)
+            return r1.colliderect(r2)
+
+        # --- shapely: formgenau ---
+        p1 = self._as_shapely()
+        if isinstance(other, Sprite):
+            p2 = other._as_shapely_union()
+        else:
+            p2 = other._as_shapely()
+
+        if p1 is None or p2 is None:
+            return False
+        try:
+            return bool(p1.intersects(p2))
+        except Exception:
+            # Fallback: bounding box collision
+            x1, y1, X1, Y1 = self.get_transformed_bbox()
+            r1 = pygame.Rect(x1, y1, X1 - x1, Y1 - y1)
+            if isinstance(other, Sprite):
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+            else:
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+            r2 = pygame.Rect(x2, y2, X2 - x2, Y2 - y2)
+            return r1.colliderect(r2)
+
+    def contains_shape(self, other):
+        # supports other = Shapes or Sprite
+        other_hidden = bool(getattr(other, "hidden", False))
+        if self.hidden or other_hidden:
+            return False
+
+        # --- ohne shapely: bbox-fallback ---
+        if not HAS_SHAPELY:
+            x1, y1, X1, Y1 = self.get_transformed_bbox()
+            r1 = pygame.Rect(x1, y1, X1 - x1, Y1 - y1)
+
+            if isinstance(other, Sprite):
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+            else:
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+
+            r2 = pygame.Rect(x2, y2, X2 - x2, Y2 - y2)
+            return r1.contains(r2)
+
+        # --- shapely: formgenau ---
+        p1 = self._as_shapely()
+        if isinstance(other, Sprite):
+            p2 = other._as_shapely_union()
+        else:
+            p2 = other._as_shapely()
+
+        if p1 is None or p2 is None:
+            return False
+        try:
+            return bool(p1.contains(p2))
+        except Exception:
+            x1, y1, X1, Y1 = self.get_transformed_bbox()
+            r1 = pygame.Rect(x1, y1, X1 - x1, Y1 - y1)
+            if isinstance(other, Sprite):
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+            else:
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+            r2 = pygame.Rect(x2, y2, X2 - x2, Y2 - y2)
+            return r1.contains(r2)
+
+    def contains_point(self, x, y):
+        if self.hidden:
+            return False
+        return self.hit_test((x, y))
+
+    def contains(self, *params):
+        # overload: contains(shape) oder contains(x,y)
+        if len(params) == 1:
+            return self.contains_shape(params[0])
+        if len(params) == 2:
+            return self.contains_point(params[0], params[1])
+        return False
+    
+    # --- Java-kompatible API (sas.jar) ---
+    def getShapeX(self): return float(self.get_transformed_bbox()[0])
+    def getShapeY(self): return float(self.get_transformed_bbox()[1])
+    def getShapeWidth(self):
+        x1,y1,x2,y2 = self.get_transformed_bbox()
+        return float(x2 - x1)
+    def getShapeHeight(self):
+        x1,y1,x2,y2 = self.get_transformed_bbox()
+        return float(y2 - y1)   
+    def getCenterX(self): return float(self.get_transformed_center()[0])
+    def getCenterY(self): return float(self.get_transformed_center()[1])
+
+    def getHidden(self): return bool(self.hidden)
+    def setHidden(self, h): self.hidden = bool(h)
+
+    def getDirection(self): return float(self.get_direction())
+    def setDirection(self, a): self.set_direction(float(a))
+
+    def getTransparency(self): return float(self.transparency)
+    def setTransparency(self, t): self.transparency = max(0.0, min(1.0, float(t)))
+
+    def moveTo(self, x, y): return self.move_to(x, y)
+    def scaleTo(self, w, h): return self.scale_to(w, h)
+
+    # SaS.jar semantics (matches original Java):
+    # flipHorizontal(): mirror on a line parallel to y-axis through center => left/right
+    def flipHorizontal(self):
+        return self.flip_horizontal()
+
+    # flipVertical(): mirror on a line parallel to x-axis through center => up/down
+    def flipVertical(self):
+        return self.flip_vertical()
+# -----------------------
+# Basic shapes
+# -----------------------
+class Rectangle(Shapes):
+    def __init__(self, x=0, y=0, width=100, height=100, color="black"):
+        self._surface_cache = None
+        super().__init__(x, y, width, height, color)
+        # lokale Punkte (Startposition steckt bereits in self.at)
+        self.points = [
+            (0, 0),
+            (width, 0),
+            (width, height),
+            (0, height),
+        ]
+
+    def draw(self, screen):
+        if self.hidden:
+            return
+        pts = self.get_transformed_points()
+        if len(pts) >= 3:
+            pygame.draw.polygon(screen, self.color, pts)
+
+
+class Polygon(Shapes):
+    def __init__(self, points, color="black"):
+        # --- Java-kompatibel: mind. ein Punkt
+        if points is None or len(points) < 1:
+            raise ValueError("Polygon braucht mindestens einen Punkt")
+
+        # Originalpunkte in Weltkoordinaten speichern
+        self._abs_points = [(float(px), float(py)) for (px, py) in points]
+
+        # Bounding-Box aus Weltpunkten
+        x, y, X, Y = bounds(self._abs_points)
+        width = X - x
+        height = Y - y
+
+        super().__init__(x, y, width, height, color)
+
+        # Lokale Punkte relativ zur Bounding-Box
+        self.points = [(px - x, py - y) for (px, py) in self._abs_points]
+
+    def add(self, dx, dy):
+        if not hasattr(self, "_abs_points") or len(self._abs_points) < 1:
+            raise RuntimeError("Polygon hat keinen Startpunkt")
+
+        x0, y0 = self._abs_points[0]
+        newp = (x0 + float(dx), y0 + float(dy))
+        self._abs_points.append(newp)
+
+        # Bounding-Box neu berechnen
+        x, y, X, Y = bounds(self._abs_points)
+        self.x, self.y = x, y
+        self.width, self.height = (X - x), (Y - y)
+
+        # Transform zurück auf reine Translation zur neuen Bounding-Box
+        self.at = _mat_translate(self.x, self.y)
+
+        # Lokale Punkte neu setzen
+        self.points = [(px - x, py - y) for (px, py) in self._abs_points]
+    
+    def draw(self, screen):
+        if self.hidden:
+            return
+        pts = self.get_transformed_points()
+        if len(pts) >= 3:
+            pygame.draw.polygon(screen, self.color, pts)
+
+
+class Ellipse(Shapes):
+    def __init__(self, x=0, y=0, width=200, height=100, color="black"):
+        super().__init__(x, y, width, height, color)
+        self.points = []
+        a, b = width / 2.0, height / 2.0
+        # feste Schrittzahl
+        step = 0.2
+        steps = int((2 * pi) / step) + 1
+        for i in range(steps + 1):
+            alpha = i * step
+            xp = a * cos(alpha) + a
+            yp = b * sin(alpha) + b
+            self.points.append((xp, yp))
+
+    def draw(self, screen):
+        if self.hidden:
+            return
+        pts = self.get_transformed_points()
+        if len(pts) >= 3:
+            pygame.draw.polygon(screen, self.color, pts)
+
+
+class Circle(Ellipse):
+    def __init__(self, x=0, y=0, radius=50, color="black"):
+        super().__init__(x, y, 2 * radius, 2 * radius, color)
+
+    def draw(self, screen):
+        if self.hidden:
+            return
+
+        # If no texture, fall back to Ellipse polygon drawing
+        if self._texture_orig is None:
+            return super().draw(screen)
+
+        # Bestimme Durchmesser rotationsinvariant (sonst "pulsiert" die Textur wegen AABB)
+        cx, cy = self.get_transformed_center()
+        # Punkt am rechten Rand im lokalen System
+        rx, ry = _mat_vec(self.at, self.width, self.height / 2.0)
+        try:
+            import math
+            r = max(1.0, math.hypot(rx - cx, ry - cy))
+        except Exception:
+            r = max(1.0, ((rx - cx) ** 2 + (ry - cy) ** 2) ** 0.5)
+        d = max(1, int(round(2.0 * r)))
+
+        # current rotation angle (we track in direction for Shapes; 90=up). Use matrix-driven angle approx.
+        # We can reuse self.get_direction() delta relative to 90 as a simple visual rotation.
+        angle = (self.get_direction() - 90) % 360
+
+        key = (d, d, int(angle))
+        surf = self._texture_cache.get(key)
+        if surf is None:
+            base = pygame.transform.smoothscale(self._texture_orig, (d, d))
+
+            # circle mask
+            mask = pygame.Surface((d, d), pygame.SRCALPHA)
+            r_ = d // 2
+            pygame.draw.circle(mask, (255, 255, 255, 255), (r_, r_), r_)
+            base.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+
+            # rotate texture with shape
+            if angle:
+                base = pygame.transform.rotate(base, -angle)
+
+            surf = base
+            self._texture_cache[key] = surf
+
+        # Place at transformed center (bereits berechnet)
+        rect = surf.get_rect(center=(int(cx), int(cy)))
+        screen.blit(surf, rect.topleft)
+
+
+
+class Picture(Shapes):
+    """Bildobjekt wie SaS.jar – verhält sich wie Shapes.
+
+    - x,y,width,height bleiben konstant (Basisgeometrie)
+    - move/turn/scale/flip arbeiten über `self.at` (geerbt von Shapes)
+    - Rendering nutzt `self.at` (Rotation/Skalierung/Spiegelung) und blitted zentriert
+
+    Zusätzlich:
+    - hit_test ist pixelgenau über pygame.Mask
+    - intersects(Picture) ist pixelgenau über Mask-Overlap
+
+    Hinweis:
+    - Für Picture-vs-Shape/Sprite bleibt die vorhandene Shapes/shapely-Logik aktiv.
+    """
+
+    def __init__(self, x=0, y=0, width=None, height=None, name="", color="black"):
+        # Bild zuerst laden (damit wir Originalgröße kennen)
+        self.path = str(name)
+
+        try:
+            img = pygame.image.load(self.path).convert_alpha()
+        except Exception as e:
+            raise RuntimeError(f"Bild konnte nicht geladen werden: {self.path}") from e
+
+        # Falls width/height nicht angegeben → Originalgröße verwenden
+        if width is None or height is None:
+            width, height = img.get_width(), img.get_height()
+
+        super().__init__(x, y, width, height, color)
+
+        # lokale Rechteckpunkte
+        self.points = [(0, 0), (width, 0), (width, height), (0, height)]
+
+        self._base_w = max(1, int(width))
+        self._base_h = max(1, int(height))
+
+        # Nur skalieren, wenn Größe explizit anders als Original
+        if self._base_w == img.get_width() and self._base_h == img.get_height():
+            self._base_image = img
+        else:
+            self._base_image = pygame.transform.smoothscale(img, (self._base_w, self._base_h))
+
+        # Cache
+        self._render_cache = {}
+        self._mask_cache = {}
+    # ---------------------------------------------------
+    # affine decomposition (aus self.at)
+    # ---------------------------------------------------
+    def _affine_params(self):
+        """Return (angle_deg, sx, sy, flipx, flipy) from self.at.
+
+        Java version draws the image with the full AffineTransform. In pygame we must
+        approximate via (scale, flip, rotate). With reflections, deriving flip from the
+        determinant is ambiguous and caused wrong turns.
+
+        Therefore:
+        - flipx/flipy come from explicit flags toggled by flip_horizontal/flip_vertical
+        - angle is read from the rotation part of the matrix using atan2(b, d)
+        """
+        a, b, _ = self.at[0]
+        c, d, _ = self.at[1]
+
+        # scale from column lengths
+        sx = (a * a + c * c) ** 0.5
+        sy = (b * b + d * d) ** 0.5
+        sx = 1.0 if sx == 0 else sx
+        sy = 1.0 if sy == 0 else sy
+
+        # rotation (robust even when a flip happened, because flips are handled separately)
+        angle_rad = atan2(b, d)
+        # Render angle is taken directly from the transform matrix.
+        # The base image is drawn unrotated; any turn/turnTo has already been applied to `self.at`.
+        angle_deg = (angle_rad * 180.0 / pi) % 360.0
+
+        flipx = bool(getattr(self, "_flipx", False))
+        flipy = bool(getattr(self, "_flipy", False))
+
+        return angle_deg, sx, sy, flipx, flipy
+
+    def _get_render_key(self):
+        angle_deg, sx, sy, flipx, flipy = self._affine_params()
+        w = max(1, int(round(self._base_w * sx)))
+        h = max(1, int(round(self._base_h * sy)))
+        ang_key = int(round(angle_deg)) % 360
+        return (w, h, ang_key, int(flipx), int(flipy))
+
+    def _get_render_surface(self):
+        key = self._get_render_key()
+        surf = self._render_cache.get(key)
+        if surf is not None:
+            return surf
+
+        w, h, ang_key, flipx, flipy = key
+        surf = pygame.transform.smoothscale(self._base_image, (w, h))
+        if ang_key:
+            rot = -ang_key
+            if bool(flipx) ^ bool(flipy):
+                rot = +ang_key
+            surf = pygame.transform.rotate(surf, -rot)
+        if flipx or flipy:
+            surf = pygame.transform.flip(surf, bool(flipx), bool(flipy))
+
+        self._render_cache[key] = surf
+        return surf
+
+    def _get_render_surface_and_mask(self):
+        key = self._get_render_key()
+        surf = self._render_cache.get(key)
+        if surf is None:
+            surf = self._get_render_surface()
+
+        m = self._mask_cache.get(key)
+        if m is None:
+            try:
+                m = pygame.mask.from_surface(surf)
+            except Exception:
+                m = None
+            self._mask_cache[key] = m
+
+        return surf, m
+
+    def draw(self, screen):
+        if self.hidden:
+            return
+
+        surf = self._get_render_surface()
+        cx, cy = self.get_transformed_center()
+        rect = surf.get_rect(center=(int(cx), int(cy)))
+        screen.blit(surf, rect.topleft)
+
+    # ---------------------------------------------------
+    # Pixelgenauer Hit-Test / Kollision
+    # ---------------------------------------------------
+    def hit_test(self, pos):
+        """Pixelgenauer Hittest auf das aktuell gerenderte Bild."""
+        if self.hidden:
+            return False
+
+        surf, m = self._get_render_surface_and_mask()
+        if m is None:
+            return super().hit_test(pos)
+
+        cx, cy = self.get_transformed_center()
+        rect = surf.get_rect(center=(int(cx), int(cy)))
+
+        x, y = pos
+        rel_x = x - rect.left
+        rel_y = y - rect.top
+
+        if rel_x < 0 or rel_y < 0 or rel_x >= rect.width or rel_y >= rect.height:
+            return False
+
+        try:
+            return m.get_at((int(rel_x), int(rel_y))) != 0
+        except Exception:
+            return rect.collidepoint(pos)
+
+    def intersects(self, other):
+        """Pixelgenau für Picture-vs-Picture, sonst Shapes/shapely."""
+        if self.hidden or bool(getattr(other, "hidden", False)):
+            return False
+
+        if isinstance(other, Picture):
+            s1, m1 = self._get_render_surface_and_mask()
+            s2, m2 = other._get_render_surface_and_mask()
+            if m1 is None or m2 is None:
+                return super().intersects(other)
+
+            c1 = self.get_transformed_center()
+            c2 = other.get_transformed_center()
+            r1 = s1.get_rect(center=(int(c1[0]), int(c1[1])))
+            r2 = s2.get_rect(center=(int(c2[0]), int(c2[1])))
+
+            if not r1.colliderect(r2):
+                return False
+
+            offset = (r2.left - r1.left, r2.top - r1.top)
+            try:
+                return m1.overlap(m2, offset) is not None
+            except Exception:
+                return r1.colliderect(r2)
+
+        return super().intersects(other)
+    
+    def scale(self, sx, sy):
+        try:
+            sx_f = float(sx)
+            sy_f = float(sy)
+        except Exception:
+            sx_f = sx
+            sy_f = sy
+
+        # Spiegelungen nur als Flags merken
+        if sx_f < 0:
+            self._flipx = not getattr(self, "_flipx", False)
+        if sy_f < 0:
+            self._flipy = not getattr(self, "_flipy", False)
+
+    # Matrix bekommt nur positive Skalierung
+        sx_pos = abs(float(sx_f))
+        sy_pos = abs(float(sy_f))
+
+        cx, cy = self.get_transformed_center()
+        S = _mat_scale(sx_pos, sy_pos)
+        va = _mat_translate(-cx, -cy)
+        ve = _mat_translate(cx, cy)
+        self.at = _mat_mul(ve, _mat_mul(S, _mat_mul(va, self.at)))
+
+    # Caches invalidieren
+        self._render_cache = {}
+        self._mask_cache = {}
+        self._texture_cache = {}
+
+    # ---------------------------------------------------
+    # Java-kompatible API (CamelCase)
+    # ---------------------------------------------------
+    def getShapeX(self): return float(self.get_transformed_bbox()[0])
+    def getShapeY(self): return float(self.get_transformed_bbox()[1])
+    def getShapeWidth(self):
+        x1, y1, x2, y2 = self.get_transformed_bbox()
+        return float(x2 - x1)
+    def getShapeHeight(self):
+        x1, y1, x2, y2 = self.get_transformed_bbox()
+        return float(y2 - y1)
+
+    def getCenterX(self): return float(self.get_transformed_center()[0])
+    def getCenterY(self): return float(self.get_transformed_center()[1])
+
+    def getHidden(self): return bool(self.hidden)
+    def setHidden(self, h): self.hidden = bool(h)
+    def isHidden(self): return self.getHidden()
+
+    def getDirection(self): return float(self.get_direction())
+    def setDirection(self, a): self.set_direction(float(a))
+
+    def moveTo(self, x, y): return self.move_to(x, y)
+    def turnTo(self, *args): return super().turnTo(*args)
+    def scaleTo(self, w, h): return self.scale_to(w, h)
+
+    # SaS.jar semantics (matches original Java):
+    def flipHorizontal(self):
+        return self.flip_horizontal()
+
+    def flipVertical(self):
+        return self.flip_vertical()
+
+    def loadTexture(self, path):
+        # SaS.jar-like alias: Bild ersetzen
+        self.path = str(path)
+        try:
+            img = pygame.image.load(self.path).convert_alpha()
+            self._base_image = pygame.transform.smoothscale(img, (self._base_w, self._base_h))
+            self._render_cache = {}
+            self._mask_cache = {}
+        except Exception as e:
+            raise RuntimeError(f"Bild konnte nicht geladen werden: {self.path}") from e
+
+
+class Text(Shapes):
+    def __init__(self, x=0, y=0, text="", color="black"):
+        super().__init__(x, y, 10, 12, color)
+        self.text = str(text)
+        self.font_name = "freesansbold.ttf"
+        self.weight_bold = False
+        self.size = 20
+        self.angle = 0
+        # Text braucht echte Breite/Höhe für korrekte Drehung/Center
+        self._update_metrics()
+
+    def set_text(self, newtext):
+        self.text = str(newtext)
+        self._update_metrics()
+
+    # def set_font_monospaced(self, bold=False, fsize=12):
+    #     # Use system monospace font for consistent metrics across platforms
+    #     self.font_family = "monospace"
+    #     self.font_name = None
+    #     self.weight_bold = bool(bold)
+    #     self.size = int(fsize)
+    #     self._update_metrics()
+
+    # def set_font_serif(self, bold=False, fsize=12):
+    #     # Use system serif font for consistent metrics across platforms
+    #     self.font_family = "serif"
+    #     self.font_name = None
+    #     self.weight_bold = bool(bold)
+    #     self.size = int(fsize)
+    #     self._update_metrics()
+
+    # def set_font_sans_serif(self, bold=False, fsize=12):
+    #     # Use system sans-serif font for consistent metrics across platforms
+    #     self.font_family = "sans"
+    #     self.font_name = None
+    #     self.weight_bold = bool(bold)
+    #     self.size = int(fsize)
+    #     self._update_metrics()
+    def setFont(self, size):
+        """Einfache Schriftgrößen-Setzung (nur eine eingebaute Font)."""
+        try:
+            self.size = int(size)
+        except Exception:
+            self.size = 20
+        self._update_metrics()
+
+    def set_font_color(self, color):
+        self.set_color(color)
+        self._update_metrics()
+
+    def get_text(self):
+        return self.text
+
+    def _get_font(self):
+        # Fallback: if a specific font file name is set and works, use it
+        try:
+            if self.font_name:
+                return pygame.font.Font(self.font_name, int(self.size))
+        except Exception:
+            pass
+
+        # Last resort
+        return pygame.font.SysFont(None, int(self.size), bold=bool(self.weight_bold))
+
+    def _update_metrics(self):
+        """Aktualisiert width/height/points anhand des unrotierten Textes.
+        Das ist wichtig, damit der (lokale) Mittelpunkt stimmt.
+        """
+        try:
+            font = self._get_font()
+            surf = font.render(self.text, True, self.color)
+            w = max(1, surf.get_width())
+            h = max(1, surf.get_height())
+        except Exception:
+            w, h = 10, 12
+
+        self.width = w
+        self.height = h
+        self.points = [(0, 0), (w, 0), (w, h), (0, h)]
+
+    def turn(self, *params):
+        """Wie Shapes.turn():
+        - turn(angle)
+        - turn(x, y, angle)
+
+        Zusätzlich merkt sich Text seinen Winkel für die Font-Rotation.
+        """
+        self._update_metrics()
+        if len(params) == 3:
+            x, y, angle = params
+            self.angle = (self.angle + angle) % 360
+            super().turn(x, y, angle)
+        elif len(params) == 1:
+            angle = params[0]
+            self.angle = (self.angle + angle) % 360
+            super().turn(angle)
+        else:
+            raise TypeError("Text.turn erwartet turn(angle) oder turn(x, y, angle)")
+
+    def draw(self, screen):
+        if self.hidden:
+            return
+
+        # Font + unrotierte Text-Surface
+        font = self._get_font()
+        base = font.render(self.text, True, self.color)
+
+        # Synchronisiere lokale Geometrie (unrotiert)
+        self.width = max(1, base.get_width())
+        self.height = max(1, base.get_height())
+        self.points = [(0, 0), (self.width, 0), (self.width, self.height), (0, self.height)]
+
+        # Rotierte Surface (Glyph-Rotation)
+        surf = base
+        if self.angle:
+            surf = pygame.transform.rotate(base, -self.angle)
+
+        # Wir blitten zentriert: Mittelpunkt (lokal) -> Welt über Matrix
+        lc_x = self.width / 2.0
+        lc_y = self.height / 2.0
+        cx, cy = _mat_vec(self.at, lc_x, lc_y)
+
+        rect = surf.get_rect(center=(int(cx), int(cy)))
+        screen.blit(surf, rect.topleft)
+
+    # --- SaS.jar-Kompatibilitäts-Aliasse (CamelCase) ---
+    def setText(self, t):
+        return self.set_text(t)
+
+    def getText(self):
+        return self.get_text()
+
+    # def setFontMonospaced(self, bold=False, fsize=12):
+    #     return self.set_font_monospaced(bold, fsize)
+
+    # def setFontSerif(self, bold=False, fsize=12):
+    #     return self.set_font_serif(bold, fsize)
+    # 
+    # def setFontSansSerif(self, bold=False, fsize=12):
+    #     return self.set_font_sans_serif(bold, fsize)
+
+    def setFontColor(self, c):
+        return self.set_font_color(c)
+
+
+# -----------------------
+# Sprite (logische Gruppe)
+# -----------------------
+class Sprite:
+    """Sprite als logische Gruppe (IDE-/pyodide-stabil).
+
+    In dieser Python-Architektur werden Shapes beim Erzeugen automatisch in die Scene eingefügt.
+    Ein SAS.jar-ähnliches Entfernen aus der Scene führt hier leicht zu "nichts wird gezeichnet"/
+    Event-Problemen.
+
+    Deshalb ist Sprite hier eine *Gruppe*: sie hält nur Referenzen auf Shapes und wendet
+    Transformationen auf alle Kinder an. Die Kinder bleiben in der Scene und werden normal
+    gezeichnet und bekommen Events.
+
+    Nutzung:
+        system = Sprite(ball)
+        system.add(ball2)
+        system.move(...)
+        system.turn(...)
+        system.scale(...)
+    """
+
+    def __init__(self, shape: 'Shapes'):
+        self.objects = []
+        if shape is not None:
+            self.objects.append(shape)
+
+        # SaS.jar-like: Sprites haben eine Richtung (0=oben, 90=rechts).
+        # Default wie in Shapes: 90.
+        try:
+            self.direction = float(shape.getDirection()) if shape is not None and hasattr(shape, "getDirection") else 90.0
+        except Exception:
+            self.direction = 90.0
+
+    def clone(self):
+        """Erzeugt eine tiefe Kopie des Sprites inkl. aller Kinder."""
+        if not self.objects:
+            s = Sprite(None)
+            s.direction = float(getattr(self, "direction", 90.0))
+            return s
+
+        # Kinder klonen (jedes Kind wird automatisch in die aktuelle Scene eingefügt)
+        clones = [obj.clone() for obj in self.objects]
+
+        # Neues Sprite mit erstem Kind erstellen, restliche hinzufügen
+        new_sprite = Sprite(clones[0])
+        for c in clones[1:]:
+            new_sprite.add(c)
+
+        # Richtung übernehmen
+        try:
+            new_sprite.direction = float(getattr(self, "direction", 90.0))
+        except Exception:
+            new_sprite.direction = 90.0
+
+        return new_sprite
+
+    def add(self, shape: 'Shapes'):
+        if shape is None:
+            return
+        if shape not in self.objects:
+            self.objects.append(shape)
+
+    def remove(self, shape: 'Shapes'):
+        if shape in self.objects:
+            self.objects.remove(shape)
+
+    def clear(self):
+        self.objects = []
+
+    # -------- direction (SaS.jar-like) --------
+    def get_direction(self):
+        return float(self.direction)
+
+    def set_direction(self, direction):
+        # normalisieren auf [0, 360)
+        try:
+            d = float(direction) % 360.0
+        except Exception:
+            d = 90.0
+        self.direction = d
+
+        # optional: Richtung an Kinder weiterreichen (SaS.jar-ähnlich)
+        for obj in self.objects:
+            if hasattr(obj, "setDirection"):
+                try:
+                    obj.setDirection(d)
+                except Exception:
+                    pass
+
+
+    # -------- transforms: auf alle Kinder anwenden --------
+    def move(self, *params):
+        """Bewegt alle Kinder.
+
+        - move(dx, dy)
+        - move(distance)  (in Sprite-Richtung)
+        """
+        if not self.objects:
+            return
+
+        if len(params) == 2:
+            dx, dy = params
+        elif len(params) == 1:
+            distance = float(params[0])
+            dy = -distance * cos(self.direction * pi / 180.0)
+            dx = distance * sin(self.direction * pi / 180.0)
+        else:
+            raise TypeError("Sprite.move erwartet move(dx,dy) oder move(distance)")
+
+        for s in self.objects:
+            s.move(dx, dy)
+
+    def move_to(self, x, y):
+        # Setzt die linke obere Ecke der Gruppen-BBox auf (x,y)
+        if not self.objects:
+            return
+        x1, y1, x2, y2 = self.get_transformed_bbox()
+        dx = x - x1
+        dy = y - y1
+        for s in self.objects:
+            s.move(dx, dy)
+
+    def turn(self, *params):
+        # turn(angle) um Gruppenmittelpunkt oder turn(x,y,angle)
+        if not self.objects:
+            return
+        if len(params) == 1:
+            angle = params[0]
+            self.direction = (float(self.direction) + float(angle)) % 360.0
+            cx, cy = self.get_center_x(), self.get_center_y()
+            for s in self.objects:
+                s.turn(cx, cy, angle)
+        elif len(params) == 3:
+            for s in self.objects:
+                s.turn(*params)
+        else:
+            raise TypeError("Sprite.turn erwartet turn(angle) oder turn(x,y,angle)")
+
+    def turn_to(self, angle):
+        # absolute Richtung: via delta
+        delta = float(angle) - float(self.direction)
+        self.turn(delta)
+        self.direction = float(angle) % 360.0
+
+    def turnTo(self, angle):
+        return self.turn_to(angle)
+
+    def scale(self, sx, sy):
+        if not self.objects:
+            return
+        cx, cy = self.get_center_x(), self.get_center_y()
+        va = _mat_translate(-cx, -cy)
+        ve = _mat_translate(cx, cy)
+        S = _mat_scale(sx, sy)
+        for s in self.objects:
+            s.at = _mat_mul(ve, _mat_mul(S, _mat_mul(va, s.at)))
+            # invalidate texture cache if present
+            if hasattr(s, "_texture_cache"):
+                s._texture_cache = {}
+
+    def scale_to(self, width, height):
+        w = self.get_shape_width() or 1
+        h = self.get_shape_height() or 1
+        self.scale(width / w, height / h)
+
+    # --- SaS.jar CamelCase alias ---
+    def scaleTo(self, w, h):
+        return self.scale_to(w, h)
+
+    def flip_horizontal(self):
+        """Spiegelt das Sprite an der Geraden durch den Gruppenmittelpunkt parallel zur y-Achse (links/rechts)."""
+        # Spiegelung = Skalierung -1 in x um den Gruppenmittelpunkt
+        self.scale(-1, 1)
+
+    def flip_vertical(self):
+        """Spiegelt das Sprite an der Geraden durch den Gruppenmittelpunkt parallel zur x-Achse (oben/unten)."""
+        # Spiegelung = Skalierung -1 in y um den Gruppenmittelpunkt
+        self.scale(1, -1)
+
+    # --- SaS.jar-Kompatibilitäts-Aliasse (CamelCase) ---
+    # SaS.jar semantics (matches original Java):
+    def flipHorizontal(self):
+        return self.flip_horizontal()
+
+    def flipVertical(self):
+        return self.flip_vertical()
+
+    # -------- bbox/center (Union der Kinder) --------
+    def get_transformed_bbox(self):
+        if not self.objects:
+            return (0, 0, 0, 0)
+        boxes = [s.get_transformed_bbox() for s in self.objects]
+        minx = min(b[0] for b in boxes)
+        miny = min(b[1] for b in boxes)
+        maxx = max(b[2] for b in boxes)
+        maxy = max(b[3] for b in boxes)
+        return (minx, miny, maxx, maxy)
+
+    def get_shape_x(self):
+        return self.get_transformed_bbox()[0]
+
+    def get_shape_y(self):
+        return self.get_transformed_bbox()[1]
+
+    # --- SaS.jar CamelCase aliases ---
+    def getShapeX(self):
+        return self.get_shape_x()
+
+    def getShapeY(self):
+        return self.get_shape_y()
+
+    def getShapeWidth(self):
+        return float(self.get_shape_width())
+
+    def getShapeHeight(self):
+        return float(self.get_shape_height())
+
+    def getCenterX(self):
+        return self.get_center_x()
+
+    def getCenterY(self):
+        return self.get_center_y()
+
+    def getDirection(self):
+        return self.get_direction()
+
+    def setDirection(self, direction):
+        return self.set_direction(direction)
+
+    def moveTo(self, x, y):
+        return self.move_to(x, y)
+
+    def get_shape_width(self):
+        x1, y1, x2, y2 = self.get_transformed_bbox()
+        return x2 - x1
+
+    def get_shape_height(self):
+        x1, y1, x2, y2 = self.get_transformed_bbox()
+        return y2 - y1
+
+    def get_center_x(self):
+        x1, y1, x2, y2 = self.get_transformed_bbox()
+        return (x1 + x2) / 2.0
+
+    def get_center_y(self):
+        x1, y1, x2, y2 = self.get_transformed_bbox()
+        return (y1 + y2) / 2.0
+
+
+    # -------- collision / contains für Sprite (Union der Kinder) --------
+    def _as_shapely_union(self):
+        """Union-Geometrie aller Kinder (falls shapely verfügbar)."""
+        if not self.objects:
+            return None
+        if not HAS_SHAPELY:
+            return None
+
+        geoms = []
+        for s in self.objects:
+            # bevorzugt echte Form
+            if hasattr(s, "_as_shapely"):
+                g = s._as_shapely()
+                if g is not None:
+                    geoms.append(g)
+                    continue
+
+            # Fallback: bbox als Polygon
+            x1, y1, x2, y2 = s.get_transformed_bbox()
+            geoms.append(ShapelyPolygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)]))
+
+        if not geoms:
+            return None
+
+        # Clean/repair geometries to avoid Topology/GEOS errors
+        cleaned = []
+        for g in geoms:
+            g2 = _shapely_clean(g)
+            if g2 is not None:
+                cleaned.append(g2)
+        if not cleaned:
+            return None
+
+        try:
+            return _shapely_clean(unary_union(cleaned))
+        except Exception:
+            # fallback: union can fail on invalid inputs; use bbox union as a safe approximation
+            x1, y1, x2, y2 = self.get_transformed_bbox()
+            try:
+                return ShapelyPolygon([(x1, y1), (x2, y1), (x2, y2), (x1, y2)])
+            except Exception:
+                return cleaned[0]
+
+    def intersects(self, other):
+        """True, wenn Sprite (Union der Kinder) other schneidet."""
+        if not self.objects:
+            return False
+
+        # --- ohne shapely: bbox-fallback ---
+        if not HAS_SHAPELY:
+            x1, y1, X1, Y1 = self.get_transformed_bbox()
+            r1 = pygame.Rect(x1, y1, X1 - x1, Y1 - y1)
+
+            if isinstance(other, Sprite):
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+            else:
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+
+            r2 = pygame.Rect(x2, y2, X2 - x2, Y2 - y2)
+            return r1.colliderect(r2)
+
+        # --- shapely: formgenau ---
+        g1 = self._as_shapely_union()
+        if g1 is None:
+            return False
+
+        if isinstance(other, Sprite):
+            g2 = other._as_shapely_union()
+        else:
+            g2 = other._as_shapely() if hasattr(other, "_as_shapely") else None
+            if g2 is None:
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+                g2 = ShapelyPolygon([(x2, y2), (X2, y2), (X2, Y2), (x2, Y2)])
+
+        return g1.intersects(g2) if g2 is not None else False
+
+    def contains_shape(self, other):
+        """True, wenn Sprite (Union) other vollständig enthält."""
+        if not self.objects:
+            return False
+
+        if not HAS_SHAPELY:
+            x1, y1, X1, Y1 = self.get_transformed_bbox()
+            r1 = pygame.Rect(x1, y1, X1 - x1, Y1 - y1)
+
+            if isinstance(other, Sprite):
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+            else:
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+
+            r2 = pygame.Rect(x2, y2, X2 - x2, Y2 - y2)
+            return r1.contains(r2)
+
+        g1 = self._as_shapely_union()
+        if g1 is None:
+            return False
+
+        if isinstance(other, Sprite):
+            g2 = other._as_shapely_union()
+        else:
+            g2 = other._as_shapely() if hasattr(other, "_as_shapely") else None
+            if g2 is None:
+                x2, y2, X2, Y2 = other.get_transformed_bbox()
+                g2 = ShapelyPolygon([(x2, y2), (X2, y2), (X2, Y2), (x2, Y2)])
+
+        return g1.contains(g2) if g2 is not None else False
+
+    def contains_point(self, x, y):
+        """True, wenn Punkt (x,y) in der Union der Kinder liegt."""
+        if not self.objects:
+            return False
+
+        if not HAS_SHAPELY:
+            x1, y1, X1, Y1 = self.get_transformed_bbox()
+            return pygame.Rect(x1, y1, X1 - x1, Y1 - y1).collidepoint((x, y))
+
+        g1 = self._as_shapely_union()
+        return g1.contains(ShapelyPolygon([(x, y), (x+0.001, y), (x+0.001, y+0.001), (x, y+0.001)])) if g1 else False
+
+    def contains(self, *params):
+        # overload wie Shapes: contains(shape|sprite) oder contains(x,y)
+        if len(params) == 1:
+            return self.contains_shape(params[0])
+        if len(params) == 2:
+            return self.contains_point(params[0], params[1])
+        return False
+    
+    # -------- Mouse delegation (SaS.jar-like) --------
+    def mouseDragged(self):
+        for obj in self.objects:
+            if hasattr(obj, "mouseDragged") and obj.mouseDragged():
+                return True
+        return False
+
+    def mousePressed(self):
+        for obj in self.objects:
+            if hasattr(obj, "mousePressed") and obj.mousePressed():
+                return True
+        return False
+
+    def mouseReleased(self):
+        for obj in self.objects:
+            if hasattr(obj, "mouseReleased") and obj.mouseReleased():
+                return True
+        return False
+
+    def mouseClicked(self):
+        for obj in self.objects:
+            if hasattr(obj, "mouseClicked") and obj.mouseClicked():
+                return True
+        return False
+
+    # -------- Mouse position delegation (SaS.jar-like) --------
+    def getMouseX(self):
+        """Gibt die Maus-X-Position des ersten Kind-Objekts zurück, das eine Mausinteraktion hatte."""
+        for obj in self.objects:
+            if hasattr(obj, "getMouseX"):
+                try:
+                    return obj.getMouseX()
+                except Exception:
+                    pass
+        return 0
+
+    def getMouseY(self):
+        """Gibt die Maus-Y-Position des ersten Kind-Objekts zurück, das eine Mausinteraktion hatte."""
+        for obj in self.objects:
+            if hasattr(obj, "getMouseY"):
+                try:
+                    return obj.getMouseY()
+                except Exception:
+                    pass
+        return 0
+# -----------------------
+# UI Widgets
+# -----------------------
+class Button(Shapes):
+    def __init__(self, x=10, y=10, w=120, h=40, text="Button", color="green"):
+        super().__init__(x, y, w, h, color)
+        self.text = text
+        self.clicked_flag = False
+        self.points = [(0, 0), (w, 0), (w, h), (0, h)]
+
+    def set_click(self):
+        self.clicked_flag = True
+
+    def clicked(self):
+        c = self.clicked_flag
+        self.clicked_flag = False
+        return c
+
+    # --- SaS.jar CamelCase aliases ---
+    def setText(self, txt):
+        self.text = str(txt)
+
+    def getText(self):
+        return self.text
+
+    def draw(self, screen):
+        if self.hidden:
+            return
+
+        rect_pts = self.get_transformed_points()
+        if len(rect_pts) >= 3:
+            pygame.draw.polygon(screen, self.color, rect_pts)
+
+        # Automatische Schriftgröße abhängig von Button-Höhe
+        x1, y1, x2, y2 = self.get_transformed_bbox()
+        bw = x2 - x1
+        bh = y2 - y1
+        padding = 8
+        font_size = max(12, bh - padding)
+
+        try:
+            font = pygame.font.SysFont(None, font_size, bold=False)
+        except Exception:
+            font = pygame.font.Font(None, font_size)
+
+        label = font.render(self.text, True, (0, 0, 0))
+
+        # Horizontal und vertikal zentrieren
+        bx = x1 + (bw - label.get_width()) // 2
+        by = y1 + (bh - label.get_height()) // 2
+        screen.blit(label, (int(bx), int(by)))
+
+    def set_mouse_press(self, pos):
+        super().set_mouse_press(pos)
+        if self.hit_test(pos):
+            self.set_click()
+
+
+class Label(Shapes):
+    def __init__(self, x=10, y=10, w=120, h=30, text="", c="green", right=False):
+        super().__init__(x, y, w, h, c)
+        self.text = text
+        self.right = bool(right)
+        self.points = [(0, 0), (w, 0), (w, h), (0, h)]
+
+    def set_text(self, txt):
+        self.text = str(txt)
+
+    def get_text(self):
+        return self.text
+
+    # --- SaS.jar CamelCase aliases ---
+    def setText(self, txt):
+        return self.set_text(txt)
+
+    def getText(self):
+        return self.get_text()
+
+    def set_right_aligned(self, right=True):
+        self.right = bool(right)
+
+    # SaS.jar-like camelCase alias
+    def setRightAligned(self, right=True):
+        return self.set_right_aligned(right)
+
+
+    def draw(self, screen):
+        if self.hidden:
+            return
+
+        # Transformierte Rechteckpunkte (lokal 0..w/0..h, Translation steckt bereits in self.at)
+        tpts = self.get_transformed_points()
+        if len(tpts) >= 3:
+            pygame.draw.polygon(screen, color_to_rgb("white"), tpts)
+            pygame.draw.polygon(screen, self.color, tpts, width=2)
+
+        # Automatische Schriftgröße abhängig von Höhe
+        x1, y1, x2, y2 = self.get_transformed_bbox()
+        rect_height = max(1, y2 - y1)
+        padding = 8
+        font_size = max(12, rect_height - padding)
+
+        try:
+            font = pygame.font.SysFont(None, font_size)
+        except Exception:
+            font = pygame.font.Font(None, font_size)
+
+        label = font.render(self.text, True, (0, 0, 0))
+
+        # Vertikal zentrieren + links/rechts ausrichten
+        rect_width = max(1, x2 - x1)
+        pad = 6
+        if getattr(self, "right", False):
+            text_x = x1 + rect_width - pad - label.get_width()
+        else:
+            text_x = x1 + pad
+
+        text_y = y1 + (rect_height - label.get_height()) // 2
+        screen.blit(label, (int(text_x), int(text_y)))
+
+
+class Textfield(Shapes):
+    def __init__(self, x=10, y=10, width=150, height=30, text = ""):
+        super().__init__(x, y, width, height, "black")
+        self.text = text
+        self.active = False
+        self.cursor_visible = True
+        self._cursor_timer = 0
+        self._enter_pressed_flag = False
+
+    def set_text(self, event_text):
+        self.text = str(event_text)
+
+    def get_text(self):
+        return self.text
+
+    # --- SaS.jar CamelCase aliases ---
+    def setText(self, txt):
+        return self.set_text(txt)
+
+    def getText(self):
+        return self.get_text()
+
+    def deleteText(self):
+        return self.delete_text()
+
+    def setActivated(self, aktivieren):
+        return self.set_activated(aktivieren)
+
+    def delete_text(self):
+        self.text = ""
+
+    def set_activated(self, aktivieren):
+        self.active = bool(aktivieren)
+
+    def set_mouse_press(self, pos):
+        super().set_mouse_press(pos)
+        clicked = self.hit_test(pos)
+
+        # Exclusive focus: if this Textfield was clicked, deactivate all others.
+        global view
+        if clicked:
+            self.active = True
+            if view is not None and hasattr(view, "scene"):
+                for g in getattr(view.scene, "graphics", []):
+                    if isinstance(g, Textfield) and g is not self:
+                        g.active = False
+                        # reset per-field enter flag so focus change feels consistent
+                        if hasattr(g, "_enter_pressed_flag"):
+                            g._enter_pressed_flag = False
+        else:
+            # click outside -> deactivate this field
+            self.active = False
+
+    def draw(self, screen):
+        x1, y1, x2, y2 = self.get_transformed_bbox()
+        rect = pygame.Rect(x1, y1, x2 - x1, y2 - y1)
+        pygame.draw.rect(screen, (255, 255, 255), rect)
+        pygame.draw.rect(screen, (0, 0, 0), rect, width=2 if self.active else 1)
+        # --- automatische Schriftgröße ---
+        padding = 8
+        font_size = max(12, rect.height - padding)
+        try:
+            font = pygame.font.SysFont(None, font_size)
+        except Exception:
+            font = pygame.font.Font(None, font_size)
+
+        surf = font.render(self.text, True, (0, 0, 0))
+        screen.blit(surf, (rect.x + 6, rect.y + (rect.height - surf.get_height()) // 2))
+        # Cursor
+        self._cursor_timer = (self._cursor_timer + 1) % 30
+        if self.active and self._cursor_timer < 15:
+            cx = int(rect.x + 6 + surf.get_width() + 2)
+            cy = int(rect.y + (rect.height - surf.get_height()) // 2)
+            pygame.draw.line(
+                screen,
+                (0, 0, 0),
+                (cx, cy),
+                (cx, cy + int(surf.get_height())),
+                1,
+            )
+
+    def _poll_keys_from_view(self):
+        global view
+        if view is None:
+            return
+        if not self.active or self.hidden:
+            return
+
+        if view.key_left_pressed():
+            return
+        if view.key_right_pressed():
+            return
+
+        if view.key_backspace_pressed():
+            if len(self.text) > 0:
+                self.text = self.text[:-1]
+            return
+
+        if view.key_enter_pressed():
+            self._enter_pressed_flag = True
+            return
+
+        ch = view.key_get_char_nowait()
+        if ch:
+            if len(ch) == 1 and ch.isprintable():
+                self.text += ch
+
+    def enterPressed(self) -> bool:
+        was = self._enter_pressed_flag
+        self._enter_pressed_flag = False
+        return was
+
+def createView(*args, **kwargs):
+    """Factory wie in SaS.jar (überladene Konstruktoren) + Python-Keywords.
+
+    Unterstützt:
+      createView() -> 600x400, white, "SaS-Programm"
+      createView(name: str)
+      createView(width: int, height: int)
+      createView(width: int, height: int, name: str)
+      createView(width: int, height: int, colour: str, title: str)
+
+    Zusätzlich (Python):
+      createView(width=..., height=..., colour=..., title=...)
+    """
+    # Keyword-Form bevorzugen
+    if kwargs:
+        width = kwargs.get("width", WIDTH)
+        height = kwargs.get("height", HEIGHT)
+        colour = kwargs.get("colour", kwargs.get("color", "white"))
+        title = kwargs.get("title", kwargs.get("name", "SaS-Programm"))
+        return View(width, height, colour, title)
+
+    # Positional-Overloads (SaS.jar-ähnlich)
+    if len(args) == 0:
+        return View(WIDTH, HEIGHT, "white", "SaS-Programm")
+    if len(args) == 1 and isinstance(args[0], str):
+        return View(WIDTH, HEIGHT, "white", args[0])
+    if len(args) == 2:
+        return View(int(args[0]), int(args[1]), "white", "SaS-Programm")
+    if len(args) == 3:
+        return View(int(args[0]), int(args[1]), "white", str(args[2]))
+    if len(args) == 4:
+        return View(int(args[0]), int(args[1]), str(args[2]), str(args[3]))
+
+    raise TypeError("createView erwartet (), (name), (width,height), (width,height,name) oder (width,height,colour,title)")
+# -----------------------
+# Utilities
+# -----------------------
+def _point_in_poly(pt, poly_pts):
+    x, y = pt
+    inside = False
+    n = len(poly_pts)
+    for i in range(n):
+        x1, y1 = poly_pts[i]
+        x2, y2 = poly_pts[(i + 1) % n]
+        if ((y1 > y) != (y2 > y)) and (
+            x < (x2 - x1) * (y - y1) / (y2 - y1 + 1e-9) + x1
+        ):
+            inside = not inside
+    return inside
+
+class Tools:
+    @staticmethod
+    def randomNumber(a, b):
+        return random.randint(int(a), int(b))
+
+    @staticmethod
+    def degreeToRadian(deg):
+        return radians(float(deg))
+
+    @staticmethod
+    def stringToInt(s):
+        return int(str(s).strip())
+
+    @staticmethod
+    def stringToFloat(s):
+        return float(str(s).strip().replace(",", "."))
+
+    @staticmethod
+    def getDirection(x1, y1, x2, y2):
+        dx = float(x2) - float(x1)
+        dy = float(y2) - float(y1)
+        # 0=oben, 90=rechts (SAS)
+        winkel  = 90.0 - (atan2(-dy, dx) * 180.0 / pi)
+        if winkel < 0:
+            winkel += 360.0
+        return winkel
+
+    @staticmethod
+    def getHour():
+        return datetime.now().hour
+
+    @staticmethod
+    def getMinute():
+        return datetime.now().minute
+
+    @staticmethod
+    def getSecond():
+        return datetime.now().second
+
+    @staticmethod
+    def getStartTime():
+        return int(time.time() * 1000)
+
+    @staticmethod
+    def getElapsedTime(start_ms):
+        return (int(time.time() * 1000) - int(start_ms)) / 1000.0
+
+    @staticmethod
+    def getElapsedTimeString(start_ms):
+        return f"{Tools.getElapsedTime(start_ms):.2f}s"
+
+    @staticmethod
+    def message(text, title="Meldung"):
+        """SaS.jar-like message dialog.
+        In Pyodide: uses JavaScript alert().
+        Fallback: print to console.
+        """
+        msg = f"{title}\n\n{text}"
+
+        # Pyodide / Browser: use JS alert
+        try:
+            from js import alert  # type: ignore
+            alert(msg)
+            return
+        except Exception:
+            pass
+
+        # Fallback: console output
+        try:
+            print(msg)
+        except Exception:
+            pass

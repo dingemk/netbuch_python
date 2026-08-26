@@ -1,0 +1,232 @@
+{
+  "examples": [
+
+    {
+      "file": "turtle/turtle_repeat2.py.txt",
+      "name": "Turtle - repeat 2",
+      "runtime": "python",
+      "image": "turtle/trepeat2.png"
+    },
+    {
+      "file": "turtle/turtle_repeat3.py.txt",
+      "name": "Turtle - repeat 3",
+      "runtime": "python",
+      "image": "turtle/trepeat3.png"
+    },
+    {
+      "file": "turtle/turtle_parameter.py.txt",
+      "name": "Turtle - Parameter",
+      "runtime": "python",
+      "image": "turtle/tparameter.png"
+    },
+    {
+      "file": "turtle/while_schleife.py.txt",
+      "name": "Turtle while - Schleife",
+      "runtime": "python",
+      "image": "turtle/twhile.png"
+    },
+    {
+      "file": "turtle/turtle_if_and.py.txt",
+      "name": "Turtle - if-else",
+      "runtime": "python",
+      "image": "turtle/tif_and.png"
+    },
+    {
+      "file": "turtle/turtle_zufallsfarben.py.txt",
+      "name": "Turtle - RGB - Farben",
+      "runtime": "python",
+      "image": "turtle/tzufall.png"
+    },
+    {
+      "file": "turtle/turtle_rekursion.py.txt",
+      "name": "Turtle - Rekursion",
+      "runtime": "python",
+      "image": "turtle/trekursion.png"
+    },
+    {
+      "file": "turtle/wordcloud.py.txt",
+      "name": "Beispiel Wordcloud",
+      "runtime": "python",
+      "image": "turtle/wcbild.png",
+      "resources": [
+        "turtle/wolke.png"
+      ]
+    },
+    {
+      "file": "turtle/formen.py.txt",
+      "name": "Pygame - Formen",
+      "runtime": "python",
+      "image": "turtle/formen.png"
+    },
+     
+    {
+      "file": "turtle/pygame_texte.py.txt",
+      "name": "Pygame - Texte",
+      "runtime": "python",
+      "image": "turtle/ptexte.png"
+    },
+     {
+      "file": "turtle/pygame_animation_bilder.py.txt",
+      "name": "Pygame - Animation Bilder",
+      "runtime": "python",
+      "image": "turtle/pani_bild.png",
+      "resources": [
+        "turtle/laeufer_links.png",
+        "turtle/laeufer_rechts.png",
+        "turtle/landschaft.png"
+      ]
+    },
+    {
+      "file": "turtle/pygame_animation_formen.py.txt",
+      "name": "Pygame - Animation Formen",
+      "runtime": "python",
+      "image": "turtle/pani_form.png"
+    },
+     {
+      "file": "turtle/mouseclick.py.txt",
+      "name": "Pygame - Mouseclick-Event",
+      "runtime": "python",
+      "image": "turtle/mausclick.png"
+    },
+    {
+      "file": "turtle/pygame_events_buttons.py.txt",
+      "name": "Pygame - Mouseevents",
+      "runtime": "python",
+      "image": "turtle/pevent_motion.png"
+    },
+    {
+      "file": "turtle/pacman.py.txt",
+      "name": "Pygame - Pacman - Spiel",
+      "runtime": "python",
+      "image": "turtle/pac.png",
+      "resources": [
+        "turtle/pacmbilder/pacman.png",
+        "turtle/pacmbilder/pac_unten.png",
+        "turtle/pacmbilder/pac_links.png",
+        "turtle/pacmbilder/pac_oben.png",
+        "turtle/pacmbilder/ghost1.png"
+      ]
+    },
+    {
+      "file": "turtle/knn_3.py.txt",
+      "name": "KI: 3-nearest-neighbour",
+      "runtime": "python",
+      "image": "turtle/knn_3.png",
+      "resources": [
+        "turtle/Kaefer_203.csv"
+      ]
+    },
+    {
+      "file": "turtle/KI_VR_algorithmus.py.txt",
+      "name": "KI: VQ-Algorithmus",
+      "runtime": "python",
+      "image": "turtle/KI_VR.png",
+      "resources": [
+        "turtle/masten.csv",
+        "turtle/mobilfunk.png"
+      ]
+    },
+    {
+      "file": "turtle/KI_verst_lernen.py.txt",
+      "name": "KI Verstärkendes Lernen",
+      "runtime": "python",
+      "image": "turtle/verst_lernen.png"
+    },
+    {
+      "file": "turtle/lingres.py.txt",
+      "name": "KI: Lineare Regression",
+      "runtime": "python",
+      "image": "turtle/lingres.png"
+    },
+    {
+      "file": "turtle/hindernis.py.txt",
+      "name": "SAS - Hindernis",
+      "runtime": "python",
+      "image": "turtle/hindernis.png"
+    },
+    {
+      "file": "turtle/darts.py.txt",
+      "name": "SAS - Darts",
+      "runtime": "python",
+      "image": "turtle/darts.png"
+    },
+    {
+      "file": "turtle/breakout.py.txt",
+      "name": "SAS - breakout",
+      "runtime": "python",
+      "image": "turtle/breakout.png"
+    },
+    {
+      "file": "turtle/windrad.py.txt",
+      "name": "SAS - Windpark",
+      "runtime": "python",
+      "image": "turtle/windpark.png"
+    },    
+     {
+      "file": "calliope3/bilder_anzeigen.py.txt",
+      "name": "Bilder auf LED-Matrix anzeigen",
+      "runtime": "c3"
+    },
+     {
+      "file": "calliope3/texte_anzeigen.py.txt",
+      "name": "Texte auf LED-Matrix anzeigen",
+      "runtime": "c3"
+    },
+     {
+      "file": "calliope3/button_test.py.txt",
+      "name": "Buttons A und B",
+      "runtime": "c3"
+    },
+      {
+      "file": "calliope3/neopixel_bounce.py.txt",
+      "name": "Farb-LED 1",
+      "runtime": "c3"
+    },
+     {
+      "file": "calliope3/neopixel_cycle.py.txt",
+      "name": "Farb-LED 2",
+      "runtime": "c3"
+    },
+     {
+      "file": "calliope3/neopixel_fade.py.txt",
+      "name": "Farb-LED 3",
+      "runtime": "c3"
+    },
+      {
+      "file": "calliope3/gpio.py.txt",
+      "name": "GPIO",
+      "runtime": "c3"
+    },
+     {
+      "file": "calliope3/libelle.py.txt",
+      "name": "Lagesensor - Libelle",
+      "runtime": "c3"
+    },
+
+     {
+      "file": "calliope2/bilder_anzeigen.py.txt",
+      "name": "Bilder auf LED-Matrix anzeigen",
+      "runtime": "c12"
+    },
+     {
+      "file": "calliope2/texte_anzeigen.py.txt",
+      "name": "Texte auf LED-Matrix anzeigen",
+      "runtime": "c12"
+    },
+     {
+      "file": "calliope2/button_test.py.txt",
+      "name": "Buttons A und B",
+      "runtime": "c12"
+    },
+      {
+      "file": "calliope2/rgb_test.py.txt",
+      "name": "Farb-LED",
+      "runtime": "c12"
+    },
+     {
+      "file": "calliope2/libelle.py.txt",
+      "name": "Lagesensor - Libelle",
+      "runtime": "c12"
+    }
+    
+  ]}

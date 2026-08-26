@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Turtle – Hilfe (Net-Schulbuch)</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+  code { white-space: nowrap; }
+  pre code { white-space: pre; }
+  .toc a { text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+</style>
+</head>
+
+<body class="bg-white">
+<div class="container p-4">
+
+<div class="d-flex justify-content-between align-items-center">
+  <h3 class="mb-0">Turtle – Hilfe</h3>
+  <a class="btn btn-outline-secondary btn-sm" href="index.html">← Zurück</a>
+</div>
+
+<p class="text-muted mt-2">
+Zeichnen mit der Turtle auf dem Canvas. Richtungssystem: <strong>0° = Norden</strong>, Winkel laufen <strong>rechtsdrehend</strong> (im Uhrzeigersinn).
+</p>
+
+<main id="top">
+  <div class="card mb-3 shadow-sm border-warning bg-light p-3">
+    <strong>Wichtig: Richtungssystem</strong><br>
+    In dieser Version gilt:
+    <span class="pill">0° = Norden</span>
+    <span class="pill">90° = Osten</span>
+    <span class="pill">180° = Süden</span>
+    <span class="pill">270° = Westen</span>
+    <br>
+    <span class="pill">right(a)</span> dreht <strong>im Uhrzeigersinn</strong> (rechts herum).
+  </div>
+
+  <div class="card mb-3 shadow-sm bg-light p-3">
+    <strong>Inhalt</strong>
+    <div class="toc" style="margin-top:10px">
+      <a href="#koord">Koordinaten & Richtung</a>
+      <a href="#start">Schnellstart</a>
+      <a href="#move">Bewegen</a>
+      <a href="#pen">Stift & Farben</a>
+      <a href="#fill">Füllen</a>
+      <a href="#speed">Geschwindigkeit</a>
+      <a href="#bg">Hintergrund</a>
+      <a href="#text">Text schreiben</a>
+      <a href="#reset">Reset & Löschen</a>
+      <a href="#tipps">Tipps</a>
+    </div>
+  </div>
+
+  <h5 class="mt-4" id="koord">1) Koordinaten & Richtung</h5>
+  <div class="grid">
+    <div class="card mb-3 shadow-sm bg-light p-3">
+      <h6 class="fw-semibold">Koordinatensystem</h6>
+      <ul>
+        <li><code>(0, 0)</code> liegt in der <strong>Bildmitte</strong>.</li>
+        <li><code>x</code> wird nach <strong>rechts</strong> größer, nach links kleiner.</li>
+        <li><code>y</code> wird nach <strong>oben</strong> größer, nach unten kleiner.</li>
+      </ul>
+      <p class="muted">Beispiel: <code>goto(100, 50)</code> geht 100 nach rechts und 50 nach oben.</p>
+    </div>
+
+    <div class="card mb-3 shadow-sm bg-light p-3">
+      <h6 class="fw-semibold">Richtung (heading)</h6>
+      <ul>
+        <li><code>0°</code> = Norden (oben)</li>
+        <li><code>90°</code> = Osten (rechts)</li>
+        <li><code>180°</code> = Süden (unten)</li>
+        <li><code>270°</code> = Westen (links)</li>
+      </ul>
+      <p class="muted">Merke: Winkel laufen <strong>im Uhrzeigersinn</strong>.</p>
+    </div>
+  </div>
+
+  <h5 class="mt-4" id="start">2) Schnellstart</h5>
+  <pre><code># Quadrat
+reset()
+speed(7)
+pencolor("black")
+pensize(2)
+
+for i in range(4):
+    forward(120)
+    right(90)
+</code></pre>
+
+  <h5 class="mt-4" id="move">3) Bewegen</h5>
+  <table class="table table-sm table-bordered">
+    <thead>
+      <tr><th>Funktion</th><th>Beschreibung</th><th>Beispiel</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>forward(dist)</code></td>
+        <td>Geht <strong>vorwärts</strong> um <code>dist</code> Pixel (zeichnet, wenn der Stift unten ist).</td>
+        <td><code>forward(100)</code></td>
+      </tr>
+      <tr>
+        <td><code>backward(dist)</code></td>
+        <td>Geht <strong>rückwärts</strong> um <code>dist</code> Pixel.</td>
+        <td><code>backward(50)</code></td>
+      </tr>
+      <tr>
+        <td><code>right(angle)</code></td>
+        <td>Dreht um <code>angle</code> Grad <strong>nach rechts</strong> (Uhrzeigersinn).</td>
+        <td><code>right(90)</code></td>
+      </tr>
+      <tr>
+        <td><code>left(angle)</code></td>
+        <td>Dreht um <code>angle</code> Grad <strong>nach links</strong> (gegen den Uhrzeigersinn).</td>
+        <td><code>left(45)</code></td>
+      </tr>
+      <tr>
+        <td><code>goto(x, y)</code></td>
+        <td>Springt/zeichnet zum Punkt <code>(x, y)</code>.</td>
+        <td><code>goto(0, 0)</code></td>
+      </tr>
+      <tr>
+        <td><code>setx(x)</code> / <code>sety(y)</code></td>
+        <td>Setzt nur eine Koordinate, die andere bleibt gleich.</td>
+        <td><code>setx(120)</code></td>
+      </tr>
+      <tr>
+        <td><code>setheading(angle)</code></td>
+        <td>Setzt die Richtung absolut (0°=Norden, rechtsdrehend).</td>
+        <td><code>setheading(180)</code></td>
+      </tr>
+      <tr>
+        <td><code>home()</code></td>
+        <td>Zur Mitte <code>(0,0)</code> und Standardrichtung.</td>
+        <td><code>home()</code></td>
+      </tr>
+      <tr>
+        <td><code>circle(r)</code></td>
+        <td>Zeichnet einen Kreis mit Radius <code>r</code> (Implementierung kann je nach Version leicht variieren).</td>
+        <td><code>circle(60)</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h5 class="mt-4" id="pen">4) Stift & Farben</h5>
+  <table class="table table-sm table-bordered">
+    <thead>
+      <tr><th>Funktion</th><th>Beschreibung</th><th>Beispiel</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>penup()</code></td>
+        <td>Stift hoch: Bewegungen zeichnen nicht.</td>
+        <td><code>penup()</code></td>
+      </tr>
+      <tr>
+        <td><code>pendown()</code></td>
+        <td>Stift runter: Bewegungen zeichnen.</td>
+        <td><code>pendown()</code></td>
+      </tr>
+      <tr>
+        <td><code>pensize(w)</code></td>
+        <td>Linienstärke in Pixel.</td>
+        <td><code>pensize(4)</code></td>
+      </tr>
+      <tr>
+        <td><code>pencolor(c)</code></td>
+        <td>Linienfarbe (CSS-Farben, z.B. <code>"red"</code>, <code>"#00ff00"</code>).</td>
+        <td><code>pencolor("#ff00ff")</code></td>
+      </tr>
+      <tr>
+        <td><code>fillcolor(c)</code></td>
+        <td>Füllfarbe für <code>begin_fill()</code>/<code>end_fill()</code>.</td>
+        <td><code>fillcolor("gold")</code></td>
+      </tr>
+      <tr>
+        <td><code>dot(size)</code></td>
+        <td>Zeichnet einen Punkt (gefüllter Kreis) an aktueller Position.</td>
+        <td><code>dot(12)</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h5 class="mt-4" id="fill">5) Füllen (begin_fill / end_fill)</h5>
+  <div class="card mb-3 shadow-sm bg-light p-3">
+    <p>
+      Mit <code>begin_fill()</code> startest du eine Füllfläche. Alle folgenden Liniensegmente werden als Rand gesammelt.
+      Mit <code>end_fill()</code> wird die Fläche mit der aktuellen <code>fillcolor()</code> gefüllt.
+    </p>
+    <ul>
+      <li>Die Fläche wird automatisch geschlossen.</li>
+      <li>Am besten funktioniert es bei <strong>geschlossenen Formen</strong> (Quadrat, Dreieck, Stern …).</li>
+      <li>Wenn du bei der Form zwischendurch <code>penup()</code> benutzt, fehlt ggf. ein Randsegment.</li>
+    </ul>
+  </div>
+
+  <pre><code># Gefülltes Dreieck
+reset()
+speed(8)
+pencolor("black")
+fillcolor("orange")
+pensize(2)
+
+begin_fill()
+for i in range(3):
+    forward(140)
+    right(120)
+end_fill()
+</code></pre>
+
+  <h5 class="mt-4" id="speed">6) Geschwindigkeit (speed)</h5>
+  <div class="card p-3">
+    <p>
+      <code>speed(n)</code> steuert, wie schnell die Turtle zeichnet (Animation).
+      Üblich ist ein Bereich von <code>0</code> bis <code>10</code>:
+    </p>
+    <ul>
+      <li><code>0</code> = so schnell wie möglich</li>
+      <li><code>1</code> = sehr langsam</li>
+      <li><code>10</code> = sehr schnell</li>
+    </ul>
+    <p class="muted">Hinweis: Je nach Browser kann die Geschwindigkeit leicht variieren.</p>
+  </div>
+
+ <h5 class="mt-4" id="bg">7) Hintergrund (bgcolor / bgpic)</h5>
+
+<div class="card p-3">
+  <p>
+    Mit diesen Funktionen legst du fest, wie der <strong>Hintergrund des Zeichenbereichs</strong> aussieht.
+  </p>
+</div>
+
+<table class="table table-sm table-bordered">
+  <thead>
+    <tr>
+      <th>Funktion</th>
+      <th>Beschreibung</th>
+      <th>Beispiel</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>bgcolor(color)</code></td>
+      <td>
+        Setzt die Hintergrundfarbe des Zeichenbereichs.<br>
+        <span class="muted">Es können alle üblichen CSS-Farben verwendet werden.</span>
+      </td>
+      <td><code>bgcolor("lightblue")</code></td>
+    </tr>
+    <tr>
+      <td><code>bgpic(image)</code></td>
+      <td>
+        Setzt ein Hintergrundbild.<br>
+        <strong>Wichtig:</strong> Das Bild muss <strong>vorher in die IDE hochgeladen</strong> worden sein.<br>
+        <span class="muted">
+          Anschließend wird der Dateiname angegeben, z.B.
+          <code>"wiese.png"</code> oder <code>"bilder/meer.png"</code>.
+        </span>
+      </td>
+      <td><code>bgpic("wiese.png")</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="card mb-3 shadow-sm border-warning bg-light p-3">
+  <strong>Merke:</strong> <code>bgpic()</code> lädt keine Bilder aus dem Internet.
+  Das Bild muss im Projekt vorhanden (hochgeladen) sein.
+</div>
+
+<pre><code># Hintergrundfarbe und Hintergrundbild
+reset()
+
+bgcolor("lightblue")
+bgpic("wiese.png")
+
+pencolor("darkgreen")
+pensize(3)
+forward(140)
+</code></pre>
+
+
+<h5 class="mt-4" id="write">8) Text schreiben (write)</h5>
+
+<div class="card mb-3 shadow-sm bg-light p-3">
+  <p>
+    <code>write(text)</code> schreibt einen Text an die aktuelle Position der Turtle.
+  </p>
+  <ul>
+    <li>Der Text erscheint genau an der aktuellen Turtle-Position.</li>
+    <li>Der Text wird <strong>nicht gedreht</strong>, sondern immer normal lesbar dargestellt.</li>
+    <li>Der Text hat die aktuell eingestellte <code>pencolor()</code>.</li>
+  </ul>
+</div>
+
+<table class="table table-sm table-bordered">
+  <thead>
+    <tr>
+      <th>Funktion</th>
+      <th>Beschreibung</th>
+      <th>Beispiel</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>write(text)</code></td>
+      <td>Schreibt den Text <code>text</code> an die aktuelle Turtle-Position.</td>
+      <td><code>write("Hallo Turtle!")</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<pre><code># Text schreiben
+reset()
+penup()
+goto(-120, 40)
+pendown()
+
+pencolor("black")
+write("Hallo Turtle!")
+</code></pre>
+
+ <hr class="my-4">
+
+<p class="mb-0"> s
+  Nächste Themen:
+  <a href="turtle.html">Turtle</a> ·
+  <a href="pygame.html">Pygame</a> ·
+  <a href="calliope2.html">Calliope 1/2</a> ·
+  <a href="calliope3.html">Calliope 3</a>
+</p>
+
+</div>
+</body>
+</html>
+       s
