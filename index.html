@@ -584,12 +584,16 @@
       if (!navigator.usb?.requestDevice || !navigator.usb?.getDevices) return;
 
       const orig = navigator.usb.requestDevice.bind(navigator.usb);
+      let forcePickerOnce = false;
+
+      window.forceUsbPicker = () => { forcePickerOnce = true; };
+      window.clearUsbPickerCache = () => { forcePickerOnce = true; };
 
       // Überschreibe requestDevice:
       navigator.usb.requestDevice = async (filters) => {
         try {
           // 1) Schon autorisierte Geräte holen (persistiert zwischen Sessions!)
-          const granted = await navigator.usb.getDevices();
+          const granted = forcePickerOnce ? [] : await navigator.usb.getDevices();
           if (granted && granted.length) {
             // Falls Filter übergeben wurden, nimm das erste passende Gerät
             const match = (Array.isArray(filters?.filters) ? filters.filters : [])
@@ -612,7 +616,11 @@
         }
 
         // 2) Keine passende Autorisierung vorhanden → normaler Picker
-        return await orig(filters);
+        try {
+          return await orig(filters);
+        } finally {
+          forcePickerOnce = false;
+        }
       };
 
       console.log('[usb-picker-once] aktiv (getDevices→silent reuse, sonst Picker)');
@@ -800,11 +808,8 @@
     })();
   </script>
 
-  <!-- Flash-Button (C12 → Download, C3 → WebUSB Full/Fast via microbit-connection) -->
-  <script type="module">
-    import { MicropythonFsHex } from "https://cdn.jsdelivr.net/npm/@microbit/microbit-fs/+esm";
-    import { createWebUSBConnection } from "https://cdn.jsdelivr.net/npm/@microbit/microbit-connection/+esm";
-
+  <!-- Flash-Button (C12 → Finder/Download, C3 → WebUSB) -->
+  <script>
     // Quelle für Python-Code: Monaco → <textarea id="py"> → Session/LocalStorage
     function getPyText() {
       try {
@@ -847,9 +852,23 @@
 
       // --- Helper für Calliope 3 ---
       const BASE_HEX_C3 = "firmware/calliope-v3-correct.hex";
-      const flagKeyFor = (serialOrTag = "global") => `c3:first_full_done:${serialOrTag}`;
+      let microbitFlashDepsPromise = null;
 
-      async function buildFullHex(pyText) {
+      async function loadMicrobitFlashDeps() {
+        microbitFlashDepsPromise ??= Promise.all([
+          import("https://cdn.jsdelivr.net/npm/@microbit/microbit-fs/+esm"),
+          import("https://cdn.jsdelivr.net/npm/@microbit/microbit-connection/+esm")
+        ]).then(([fsMod, connectionMod]) => ({
+          MicropythonFsHex: fsMod.MicropythonFsHex,
+          createWebUSBConnection: connectionMod.createWebUSBConnection,
+        }));
+        return microbitFlashDepsPromise;
+      }
+      loadMicrobitFlashDeps().catch((e) => {
+        console.warn("[Calliope3] WebUSB-Bibliotheken konnten nicht vorgeladen werden:", e);
+      });
+
+      async function buildFullHex(pyText, MicropythonFsHex) {
         const r = await fetch(BASE_HEX_C3, { cache: "no-store" });
         if (!r.ok) throw new Error(`HTTP ${r.status} – ${BASE_HEX_C3}`);
         const baseHex = await r.text();
@@ -857,18 +876,8 @@
         fs.write("main.py", pyText);
         return fs.getIntelHex();
       }
-      async function getSerialTag(usb) {
-        try {
-          const d = usb?.transport?.device || usb?.device;
-          return d?.serialNumber || "global";
-        } catch { return "global"; }
-      }
-
-      // Fortschritt nur in groben Stufen loggen:
-      // full  → 0/20/40/60/80/100
-      // fast  → 0/50/100
-      function makeStepProgressLogger(kind, log) {
-        const steps = (kind === 'full') ? [0, 20, 40, 60, 80, 100] : [0, 50, 100];
+      function makeStepProgressLogger(log) {
+        const steps = [0, 20, 40, 60, 80, 100];
         let last = -1;
 
         return (p) => {
@@ -955,19 +964,7 @@
 
 
       async function flashCalliope3() {
-        // NEU: für Calliope 3 immer den gebündelten Python-Code (mit Inline-Modulen) verwenden
-        let pyText = "";
-        if (typeof window.getBundledPy === "function") {
-          try {
-            pyText = await window.getBundledPy();
-          } catch (e) {
-            console.warn("[flashCalliope3] getBundledPy() failed, fallback auf Rohtext:", e);
-          }
-        }
-        if (!pyText) {
-          pyText = getPyText();
-        }
-        if (!pyText) {
+        if (!String(getPyText() || "").trim()) {
           log('❌ Kein Python-Code (Editor ist leer).', 'text-danger');
           return;
         }
@@ -977,36 +974,55 @@
           return;
         }
 
+        let deps;
+        try {
+          deps = await loadMicrobitFlashDeps();
+        } catch (e) {
+          log('❌ WebUSB-Bibliotheken konnten nicht geladen werden. Bitte Internetverbindung/CDN prüfen.', 'text-danger');
+          throw e;
+        }
 
         const wasOpen = !!(window.CalliopeSerial?.isOpen?.());
         if (wasOpen) { try { await window.CalliopeSerial.closeSerial(); } catch { } }
         // NEU: Während des Flashens Boot-/Reset-Ausgaben unterdrücken und Auto-Reconnect erlauben
         try { window.CalliopeSerial?.expectReset?.(8000); } catch { }
-        const usb = createWebUSBConnection();
-        await usb.connect();
+        window.forceUsbPicker?.();
+        const usb = deps.createWebUSBConnection();
 
-        const tag = await getSerialTag(usb);
-        const fullHex = await buildFullHex(pyText);
-        const firstDone = !!localStorage.getItem(flagKeyFor(tag));
+        try {
+          await usb.connect();
 
-        // Reconnect-Fenster setzen (optional – schadet nicht)
-        try { window.CalliopeSerial?.expectReset?.(8000); } catch { }
+          // NEU: für Calliope 3 immer den gebündelten Python-Code (mit Inline-Modulen) verwenden
+          let pyText = "";
+          if (typeof window.getBundledPy === "function") {
+            try {
+              pyText = await window.getBundledPy();
+            } catch (e) {
+              console.warn("[flashCalliope3] getBundledPy() failed, fallback auf Rohtext:", e);
+            }
+          }
+          if (!pyText) {
+            pyText = getPyText();
+          }
+          if (!pyText) {
+            log('❌ Kein Python-Code (Editor ist leer).', 'text-danger');
+            return;
+          }
 
-        if (!firstDone) {
+          const fullHex = await buildFullHex(pyText, deps.MicropythonFsHex);
+
+          // Reconnect-Fenster setzen (optional – schadet nicht)
+          try { window.CalliopeSerial?.expectReset?.(8000); } catch { }
+
           log("⚡ Voll-Flash (microbit-connection) …");
-          const stepLogFull = makeStepProgressLogger('full', log);
+          const stepLogFull = makeStepProgressLogger(log);
           await usb.flash(async () => fullHex, { progress: (p) => stepLogFull(p) });
-          localStorage.setItem(flagKeyFor(tag), "1");
           log("✅ Voll-Flash fertig.", "text-success");
-        } else {
-          log("⚡ Schnell-Flash (partial, microbit-connection) …");
-          const stepLogFast = makeStepProgressLogger('fast', log);
-          await usb.flash(async () => fullHex, { partial: true, progress: (p) => stepLogFast(p) });
-          log("✅ Schnell-Flash fertig.", "text-success");
-        }
 
-        // WebUSB sauber trennen
-        try { await usb.disconnect?.(); } catch { }
+        } finally {
+          // WebUSB sauber trennen
+          try { await usb.disconnect?.(); } catch { }
+        }
 
         // 🔁 HIER wieder SERIELL öffnen – ohne Picker, mit Port-Reuse
         // 🔁 Serielle nur leise wiederherstellen, wenn bereits freigegeben (kein Picker, kein Warn-Log)
@@ -1075,6 +1091,14 @@
           }
 
           // -------- C12: Calliope 1/2 --------
+          let c12Handle = null;
+          let savedViaPicker = false;
+          if ('showSaveFilePicker' in window && window.isSecureContext) {
+            c12Handle = await window.showSaveFilePicker({
+              suggestedName: 'main.hex',
+              types: [{ description: 'Calliope HEX', accept: { 'text/plain': ['.hex'] } }]
+            });
+          }
 
           // 🆕 Modul-Importe auf Calliope 1/2 blockieren
           try {
@@ -1106,16 +1130,29 @@
             // Zur Sicherheit trotzdem weiterflashen
           }
 
-          // C12: Mass-Storage → Board enumeriert neu, Serial-Handle wechselt.
-          try { window.CalliopeSerial?.expectReset?.(12000); } catch { }
-
           uiLog('⚡ Übertrage HEX an Calliope 1/2 …');
 
-          // ✅ HEX bauen + Download
-          await CalliopeHex.buildAndDownload();
+          if (c12Handle) {
+            // C12: Mass-Storage → Board enumeriert neu, Serial-Handle wechselt.
+            try { window.CalliopeSerial?.expectReset?.(12000); } catch { }
+
+            const hexText = await CalliopeHex._buildHexText();
+            const w = await c12Handle.createWritable();
+            await w.write(hexText);
+            await w.close();
+            savedViaPicker = true;
+            uiLog('💾 HEX gespeichert: ' + (c12Handle.name || 'main.hex'));
+          } else {
+            try { window.CalliopeSerial?.expectReset?.(12000); } catch { }
+            await CalliopeHex.buildAndDownload();
+          }
 
           // stiller Hinweis (optional, aber hilfreich)
-          uiLog('📁 main.hex heruntergeladen – warte auf Calliope-Neustart …', 'text-muted');
+          uiLog(savedViaPicker
+            ? '📁 main.hex gespeichert – warte auf Calliope-Neustart …'
+            : '📁 main.hex heruntergeladen – warte auf Calliope-Neustart …',
+            'text-muted'
+          );
 
           // 🔒 sehr defensiver, einmaliger Auto-Reconnect (ohne User-Dialog)
           setTimeout(() => {
