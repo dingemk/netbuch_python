@@ -46,6 +46,7 @@
       forcePicker = false,
       mode = "monitor",
       baudRate = 115200,
+      filters = null,
     } = opts;
 
     if (S.opening) return;
@@ -83,7 +84,7 @@
       }
       // 2) Picker explizit gewünscht?
       else if (forcePicker === true) {
-        S.port = S.port = await navigator.serial.requestPort();
+        S.port = await navigator.serial.requestPort(filters ? { filters } : {});
       }
       // 3) Kein Picker erlaubt: nur bereits freigegebene Ports nehmen
       else {

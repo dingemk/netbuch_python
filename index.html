@@ -758,6 +758,11 @@
         outEl?.scrollTo?.(0, outEl.scrollHeight);
       };
 
+      function getSelectedDeviceTarget() {
+        const sel = document.getElementById('device-select');
+        return sel && (sel.value === 'c12' || sel.value === 'c3') ? sel.value : 'c12';
+      }
+
 
 
 
@@ -790,8 +795,14 @@
           if (!window.CalliopeSerial.isOpen()) {
             // Picker IMMER zeigen, damit es klar ist, welches Gerät gewählt wird
             const mode = e.altKey ? 'repl' : 'monitor';
+            const serialFilters = getSelectedDeviceTarget() === 'c3'
+              ? [{ usbVendorId: 0x0D28 }]
+              : null;
             console.info('[UI] Verbinden geklickt → öffne Serial-Picker …');
-            await CalliopeSerial.openSerial({ mode, forcePicker: true });
+            await CalliopeSerial.openSerial({ mode, forcePicker: true, filters: serialFilters });
+            if (window.CalliopeSerial.isOpen?.()) {
+              log('✅ Serielle Verbindung hergestellt.', 'text-success');
+            }
           } else {
             console.info('[UI] Trennen geklickt → schließe Serial …');
             await CalliopeSerial.closeSerial();
@@ -857,7 +868,7 @@
       async function loadMicrobitFlashDeps() {
         microbitFlashDepsPromise ??= Promise.all([
           import("https://cdn.jsdelivr.net/npm/@microbit/microbit-fs/+esm"),
-          import("https://cdn.jsdelivr.net/npm/@microbit/microbit-connection/+esm")
+          import("https://cdn.jsdelivr.net/npm/@microbit/microbit-connection@0.1.0/+esm")
         ]).then(([fsMod, connectionMod]) => ({
           MicropythonFsHex: fsMod.MicropythonFsHex,
           createWebUSBConnection: connectionMod.createWebUSBConnection,
@@ -892,6 +903,23 @@
             }
           }
         };
+      }
+
+      function flagKeyFor(serialOrTag) {
+        return `c3:first_full_done:${serialOrTag || 'global'}`;
+      }
+
+      async function getSerialTag(usb) {
+        try {
+          const d = usb?.transport?.device || usb?.device;
+          const serial = d?.serialNumber;
+          if (serial) return serial;
+          if (typeof d?.open === 'function' && !d.opened) {
+            await d.open();
+            return d.serialNumber || 'global';
+          }
+        } catch { }
+        return 'global';
       }
 
       window.reopenSerialWhenReady ??= async function reopenSerialWhenReady(
@@ -970,7 +998,7 @@
         }
         // NEU: Verbindungspflicht – ohne offene serielle Verbindung kein Flash
         if (!window.CalliopeSerial?.isOpen?.()) {
-          alert("Bitte zuerst auf „Verbinden“ klicken und die serielle Verbindung herstellen.");
+          log('❌ Bitte zuerst auf „Verbinden“ klicken und die serielle Verbindung herstellen.', 'text-danger');
           return;
         }
 
@@ -986,7 +1014,6 @@
         if (wasOpen) { try { await window.CalliopeSerial.closeSerial(); } catch { } }
         // NEU: Während des Flashens Boot-/Reset-Ausgaben unterdrücken und Auto-Reconnect erlauben
         try { window.CalliopeSerial?.expectReset?.(8000); } catch { }
-        window.forceUsbPicker?.();
         const usb = deps.createWebUSBConnection();
 
         try {
@@ -1014,10 +1041,20 @@
           // Reconnect-Fenster setzen (optional – schadet nicht)
           try { window.CalliopeSerial?.expectReset?.(8000); } catch { }
 
-          log("⚡ Voll-Flash (microbit-connection) …");
-          const stepLogFull = makeStepProgressLogger(log);
-          await usb.flash(async () => fullHex, { progress: (p) => stepLogFull(p) });
-          log("✅ Voll-Flash fertig.", "text-success");
+          const serialTag = await getSerialTag(usb);
+          const firstFullDone = localStorage.getItem(flagKeyFor(serialTag)) === "1";
+          const stepLog = makeStepProgressLogger(log);
+
+          if (!firstFullDone) {
+            log("⚡ Erstübertragung an Calliope mini 3 …");
+            await usb.flash(async () => fullHex, { progress: (p) => stepLog(p) });
+            localStorage.setItem(flagKeyFor(serialTag), "1");
+            log("✅ Erstübertragung fertig.", "text-success");
+          } else {
+            log("⚡ Übertrage Programm an Calliope mini 3 …");
+            await usb.flash(async () => fullHex, { partial: true, progress: (p) => stepLog(p) });
+            log("✅ Programm übertragen.", "text-success");
+          }
 
         } finally {
           // WebUSB sauber trennen
@@ -1079,6 +1116,34 @@
           out?.scrollTo?.(0, out.scrollHeight);
         };
 
+        const isStaleFileHandleError = (err) =>
+          /state cached in an interface object|changed since it was read from disk/i
+            .test(String(err?.message || err || ""));
+
+        const pickC12HexFile = () => window.showSaveFilePicker({
+          suggestedName: 'main.hex',
+          types: [{ description: 'Calliope HEX', accept: { 'text/plain': ['.hex'] } }]
+        });
+
+        const saveC12HexWithPicker = async (hexText, firstHandle = null) => {
+          let handle = firstHandle || await pickC12HexFile();
+          try {
+            const w = await handle.createWritable();
+            await w.write(hexText);
+            await w.close();
+            return handle;
+          } catch (err) {
+            if (!isStaleFileHandleError(err)) throw err;
+
+            uiLog('ℹ️ Das Calliope-Laufwerk hat sich neu gemeldet – bitte die HEX-Datei noch einmal auswählen.', 'text-muted');
+            handle = await pickC12HexFile();
+            const w = await handle.createWritable();
+            await w.write(hexText);
+            await w.close();
+            return handle;
+          }
+        };
+
         try {
           out?.replaceChildren();
 
@@ -1091,13 +1156,17 @@
           }
 
           // -------- C12: Calliope 1/2 --------
+          // C12: Mass-Storage → ein offener Serial-Port kann beim Schreiben/Remount stören.
+          // Deshalb vor dem Dateiauswahldialog schließen, nicht erst danach.
+          try { window.CalliopeSerial?.expectReset?.(12000); } catch { }
+          if (window.CalliopeSerial?.isOpen?.()) {
+            try { await window.CalliopeSerial.closeSerial(); } catch { }
+          }
+
           let c12Handle = null;
           let savedViaPicker = false;
           if ('showSaveFilePicker' in window && window.isSecureContext) {
-            c12Handle = await window.showSaveFilePicker({
-              suggestedName: 'main.hex',
-              types: [{ description: 'Calliope HEX', accept: { 'text/plain': ['.hex'] } }]
-            });
+            c12Handle = await pickC12HexFile();
           }
 
           // 🆕 Modul-Importe auf Calliope 1/2 blockieren
@@ -1133,13 +1202,8 @@
           uiLog('⚡ Übertrage HEX an Calliope 1/2 …');
 
           if (c12Handle) {
-            // C12: Mass-Storage → Board enumeriert neu, Serial-Handle wechselt.
-            try { window.CalliopeSerial?.expectReset?.(12000); } catch { }
-
             const hexText = await CalliopeHex._buildHexText();
-            const w = await c12Handle.createWritable();
-            await w.write(hexText);
-            await w.close();
+            c12Handle = await saveC12HexWithPicker(hexText, c12Handle);
             savedViaPicker = true;
             uiLog('💾 HEX gespeichert: ' + (c12Handle.name || 'main.hex'));
           } else {
